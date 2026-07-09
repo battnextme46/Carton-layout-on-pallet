@@ -5,13 +5,13 @@ import plotly.graph_objects as go
 
 # --- การตั้งค่าหน้าเว็บ ---
 st.set_page_config(
-    page_title="Carton Palletizing Optimizer V6.0", 
+    page_title="Carton Palletizing Optimizer V6.1", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("📦 Carton Palletizing Layout Optimizer (Version 6.0)")
-st.write("เครื่องมือวิเคราะห์การจัดวางกล่องเวอร์ชันสมบูรณ์ (Top View SVG + 2D Side Views + Interactive Plotly 3D)")
+st.title("📦 Carton Palletizing Layout Optimizer (Version 6.1)")
+st.write("เครื่องมือวิเคราะห์การจัดวางกล่องเวอร์ชันสมบูรณ์ (ตัวเลขอ่านทิศทางชิดขอบ + ปิดแสงเงาหลอกตา + ล็อกสเกล 3D จริงตามหลักเรขาคณิต)")
 
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("1. ข้อมูลกล่องสินค้า (mm)")
@@ -62,7 +62,7 @@ def calculate_pallet_layout(bw_used, bl_used, bh_used, case_name, is_normal_case
         "USED_W": used_w, "USED_L": used_l
     }
 
-# ประมวลผลลัพธ์
+# ประมวลผลลัพธ์ 6 ทิศทาง
 dims = [box_w, box_l, box_h]
 dim_names = ['W', 'L', 'H']
 normal_cases, alt_cases = [], []
@@ -109,15 +109,16 @@ def generate_svg_pallet_layer(params, color_theme):
             x, y = ox + i * (bw + box_tolerance), oy + j * (bl + box_tolerance)
             svg += f'<rect x="{x}" y="{y}" width="{bw}" height="{bl}" fill="#ffedd5" stroke="#ea580c" stroke-width="2" rx="4" />'
             
-            # ตัวเลขด้านกว้างชิดขอบบน
+            # ตัวเลขด้านกว้างขยับขึ้นชิดขอบกล่องด้านบน
             svg += f'<text x="{x + bw/2}" y="{y + 25}" font-size="16" font-weight="bold" fill="#c2410c" text-anchor="middle">{int(bw)}</text>'
-            # ตัวเลขด้านยาวชิดขอบขวาพร้อมหมุนแนวตั้ง
+            
+            # ตัวเลขด้านยาวขยับไปทางขวาชิดขอบกล่อง และหมุนตั้งฉากขนานไปกับขอบตามหลักวิศวกรรม
             svg += f'<text x="{x + bw - 12}" y="{y + bl/2}" font-size="16" font-weight="bold" fill="#475569" text-anchor="middle" transform="rotate(-90, {x + bw - 12}, {y + bl/2})">{int(bl)}</text>'
             
     svg += '</svg>'
     return svg
 
-# --- 2D SIDE VIEW ENGINE (MATPLOTLIB - English Labels) ---
+# --- 2D SIDE VIEW ENGINE (MATPLOTLIB) ---
 def generate_2d_side_views(params, color_theme, view_type='front'):
     fig, ax = plt.subplots(figsize=(8, 5))
     layers = params["MAX_LAYERS"]
@@ -159,7 +160,7 @@ def generate_2d_side_views(params, color_theme, view_type='front'):
     plt.tight_layout()
     return fig
 
-# --- PLOTLY 3D ENGINE (ปรับปรุง: ปิดแสงเงา และล็อกสเกลมิติจริง) ---
+# --- PLOTLY 3D ENGINE (TRUE GEOMETRIC SCALE & NO SHADOWS) ---
 def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color):
     fig.add_trace(go.Mesh3d(
         x=[x, x+dx, x+dx, x, x, x+dx, x+dx, x],
@@ -172,18 +173,18 @@ def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color):
         opacity=1.0, 
         flatshading=True, 
         showscale=False,
-        # --- ลบแสงเงาหลอกตา ออกไปทั้งหมดให้สีกล่องเนียนเสมอกัน ---
+        # ลบแสงเงาหลอกตาออกไปทั้งหมดเพื่อให้สีกล่องเรียบเนียนเสมอกันทุกด้าน
         lighting=dict(
-            ambient=1.0,      # แสงสว่างรอบตัวเต็มที่ สีจะไม่ดรอป
-            diffuse=0.0,      # ปิดแสงสะท้อนฉาก
-            specular=0.0,     # ปิดจุดสะท้อนเงาแวววาว
-            roughness=1.0,    # ตั้งค่าผิวให้ด้านที่สุด
+            ambient=1.0,      
+            diffuse=0.0,      
+            specular=0.0,     
+            roughness=1.0,    
             fresnel=0.0
         ),
         lightposition=dict(x=0, y=0, z=0)
     ))
     
-    # วาดเส้นขอบกล่อง (Wireframe)
+    # วาดเส้น Wireframe ขอบกล่องเพิ่มความชัดเจนเชิงวิศวกรรม
     for edge in [
         ([x, x+dx], [y, y], [z, z]), ([x, x], [y, y+dy], [z, z]), ([x+dx, x+dx], [y, y+dy], [z, z]), ([x, x+dx], [y+dy, y+dy], [z, z]),
         ([x, x+dx], [y, y], [z+dz, z+dz]), ([x, x], [y, y+dy], [z+dz, z+dz]), ([x+dx, x+dx], [y, y+dy], [z+dz, z+dz]), ([x, x+dx], [y+dy, y+dy], [z+dz, z+dz]),
@@ -211,26 +212,27 @@ def generate_plotly_3d(params, color_theme, edge_theme):
                 gx = ox + i * (bw + box_tolerance)
                 draw_plotly_cube(fig, gx, gy, gz, bw, bl, bh, color_theme, edge_theme)
                 
-    # วาดแผ่นระนาบเพดาน Limit แดงโปร่งแสง
+    # วาดระนาบเพดานสูงสุด Limit แดงโปร่งแสง
     fig.add_trace(go.Mesh3d(
         x=[0, pallet_w, pallet_w, 0], y=[0, 0, pallet_l, pallet_l], z=[max_air_height]*4,
         color='#ef4444', opacity=0.12, name='Limit Height'
     ))
     
-    # คำนวณช่วงสูงสุดของแกนเพื่อใช้คุมระยะการมองเห็น
-    max_range_val = max(pallet_w, pallet_l, max_air_height) + 100
+    # --- ปรับปรุงสูตรควบคุมสเกล (True Geometric Scale Logic) ---
+    # ใช้ค่าขนาดกว้าง-ยาวจริงของพาเลทเป็นฐานในการคำนวณอัตราส่วนแกนภาพแทนการใช้ความสูงสูงสุดขยายตัวเลข
+    base_max = max(pallet_w, pallet_l)
     
     fig.update_layout(
         scene=dict(
-            xaxis=dict(title='Width (mm)', range=[-100, max_range_val]),
-            yaxis=dict(title='Length (mm)', range=[-100, max_range_val]),
-            zaxis=dict(title='Height (mm)', range=[0, max_range_val]),
-            # --- บังคับให้สเกลแกน X, Y, Z สมส่วนเท่ากันจริงตามหน่วยมิลลิเมตร (True Proportion) ---
+            xaxis=dict(title='Width (mm)', range=[-100, pallet_w + 100]),
+            yaxis=dict(title='Length (mm)', range=[-100, pallet_l + 100]),
+            zaxis=dict(title='Height (mm)', range=[0, max_air_height + 100]),
+            # บังคับการล็อกอัตราส่วนสัมพันธ์ตามขนาดเรขาคณิตกายภาพจริงของโมเดล (1 มิลลิเมตรเท่ากันทุกแกน)
             aspectmode='manual',
             aspectratio=dict(
-                x=pallet_w / max_range_val,
-                y=pallet_l / max_range_val,
-                z=max_air_height / max_range_val
+                x=pallet_w / base_max,
+                y=pallet_l / base_max,
+                z=max_air_height / base_max
             )
         ),
         margin=dict(r=0, l=0, b=0, t=30),
