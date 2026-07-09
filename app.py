@@ -11,8 +11,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("📦 Carton Palletizing Layout Optimizer (6-Way & Solid 3D)")
-st.write("เครื่องมือวิเคราะห์การจัดวางกล่องบนพาเลทเวอร์ชันปรับปรุงการแสดงผลซ้อนทับให้สมบูรณ์")
+st.title("📦 Carton Palletizing Layout Optimizer (Solid 3D V3)")
+st.write("เครื่องมือวิเคราะห์การจัดวางกล่องสินค้าบนพาเลทเวอร์ชันแก้ไขบั๊กการแสดงผลซ้อนทับ (Z-Order Fixed)")
 
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("1. ข้อมูลกล่องสินค้า (mm)")
@@ -116,8 +116,8 @@ def generate_svg_pallet_layer(params, color_theme):
     svg += '</svg>'
     return svg
 
-# --- FIXED: MATPLOTLIB 3D SOLID ENGINE ---
-def draw_3d_solid_box(ax, x, y, z, bw, bl, bh, fill_color, edge_color, alpha_val=1.0):
+# --- FIXED V3: MATPLOTLIB 3D ENGINE (NO LINE OVERLAPPING) ---
+def draw_3d_perfect_box(ax, x, y, z, bw, bl, bh, fill_color, edge_color):
     corners = np.array([
         [x, y, z], [x + bw, y, z], [x + bw, y + bl, z], [x, y + bl, z],
         [x, y, z + bh], [x + bw, y, z + bh], [x + bw, y + bl, z + bh], [x, y + bl, z + bh]
@@ -130,11 +130,11 @@ def draw_3d_solid_box(ax, x, y, z, bw, bl, bh, fill_color, edge_color, alpha_val
         [corners[2], corners[3], corners[7], corners[6]], # Side 3
         [corners[3], corners[0], corners[4], corners[7]]  # Side 4
     ]
-    # ตั้งค่า alpha เป็น 1.0 (ทึบแสง) และเปิด shade=True ช่วยให้วัตถุด้านหลังไม่ทะลุมาด้านหน้า
-    collection = Poly3DCollection(faces, facecolors=fill_color, linewidths=1.0, edgecolors=edge_color, alpha=alpha_val)
+    # ปรับแต่งความทึบแสงและปิดแสงเงาหลอกตา (shade=False) เพื่อตัดปัญหาเส้นซ้อนทับของหน้าสัมผัส
+    collection = Poly3DCollection(faces, facecolors=fill_color, linewidths=1.2, edgecolors=edge_color, shade=False)
     ax.add_collection3d(collection)
 
-def generate_solid_3d_view(params, pallet_color):
+def generate_perfect_3d_view(params, pallet_color):
     if params["TOTAL_BOXES"] == 0:
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection='3d')
@@ -148,48 +148,55 @@ def generate_solid_3d_view(params, pallet_color):
     sw, sl, layers = params["SLOTS_W"], params["SLOTS_L"], params["MAX_LAYERS"]
     bw, bl, bh = params["BW_USED"], params["BL_USED"], params["BH_USED"]
     
-    # ดึงพิกัดมุมเริ่มต้น
     ox = (pallet_w - params["USED_W"]) / 2
     oy = (pallet_l - params["USED_L"]) / 2
 
-    # ลำดับการวาด (Rendering Order) สำคัญมากใน 3D Matplotlib 
-    # เพื่อแก้ปัญหาเส้นซ้อน เราจะวาด พาเลทก่อน -> แล้วค่อยวาดกล่องจาก ล่างขึ้นบน และ หลังมาหน้า
+    # --- 1. วาดพาเลทไว้ที่ชั้นแรกสุดใต้กล่อง ---
+    draw_3d_perfect_box(ax, 0, 0, 0, pallet_w, pallet_l, pallet_h, "#cbd5e1", pallet_color)
     
-    # 1. วาดพาเลทจริง (ใช้สีทึบเพื่อไม่ให้แกนกราฟด้านล่างโผล่ทะลุขึ้นมา)
-    draw_3d_solid_box(ax, 0, 0, 0, pallet_w, pallet_l, pallet_h, "#cbd5e1", pallet_color, alpha_val=1.0)
-    
-    # 2. วาดกล่องทีละใบด้วยสีทึบแสง (Alpha = 1.0) 
-    # ทำการลูปเรียงตามลำดับความลึกจริง เพื่อป้องกันข้อผิดพลาดการคำนวณระนาบซ้อนทับของไลบรารี
+    # --- 2. วาดกล่องโดยแก้ปัญหา Occlusion (จากลึกสุดมาตื้นสุด) ---
+    # สำหรับมุมมอง azim=-125 วัตถุที่อยู่ลึกที่สุดคือแถว j=0 และ i=0 
+    # ดังนั้นลูปปกติไล่จาก 0 ไปยัง sl และ sw จะช่วยให้กล่องชิ้นหน้าสุดวาดทับชิ้นหลังได้อย่างถูกต้องตามธรรมชาติ
     for k in range(layers):
         gz = pallet_h + (k * bh)
-        # เรียงลำดับแกนจากหลังมาหน้าตามมุมมอง Azimuth -125 (เริ่มจากดัชนีจินตภาพที่อยู่ไกลสายตาก่อน)
-        for j in reversed(range(sl)):
+        for j in range(sl):
             gy = oy + j * (bl + box_tolerance)
             for i in range(sw):
                 gx = ox + i * (bw + box_tolerance)
-                draw_3d_solid_box(ax, gx, gy, gz, bw, bl, bh, "#ffedda", "#ea580c", alpha_val=1.0)
+                draw_3d_perfect_box(ax, gx, gy, gz, bw, bl, bh, "#ffedd5", "#ea580c")
     
-    # 3. ย้ายเส้นแสดงลิมิตความสูงไปไว้ที่มุมนอกสุด เพื่อไม่ให้พาดผ่านตรงกลางกล่อง
-    # วาดเสาวัดความสูงสี่มุมแบบโครงเสาภายนอกแทนเส้นทะลุตัวกล่อง
-    ax.plot([pallet_w, pallet_w], [pallet_l, pallet_l], [0, max_air_height], color='#ef4444', linestyle='-', linewidth=2)
-    ax.plot([0, pallet_w, pallet_w, 0, 0], [0, 0, pallet_l, pallet_l, 0], max_air_height, color='#ef4444', linestyle='--', linewidth=1.5)
+    # --- 3. แก้ไขจุดวงสีม่วงเรื่องเส้นลิมิตพาดผ่านและข้อความทับกัน ---
+    # ดึงเส้นกรอบลิมิตและเสาออกมาไว้นอกพื้นที่โมเดลสินค้า (ขยับแกนออกไปทางลบเล็กน้อย เพื่อไม่ให้ตัดผ่านกล่อง)
+    offset = -80
+    ax.plot([offset, offset], [offset, offset], [0, max_air_height], color='#ef4444', linestyle='-', linewidth=2.5)
     
-    # จัดมุมมองให้เสา limit ไม่บังสินค้า
-    ax.view_init(elev=22, azim=-125)
+    # ขยับข้อความแกน Z ให้แยกห่างกัน ไม่ให้ทับซ้อนกันแบบจุดสีม่วงมุมซ้ายบน
+    ax.text(offset - 150, offset, pallet_h, f"Pallet H: {int(pallet_h)} mm", color='#475569', weight='bold')
+    ax.text(offset - 150, offset, params["TOTAL_HEIGHT"], f"Cargo H: {int(params['TOTAL_HEIGHT'])} mm", color=pallet_color, weight='bold')
+    ax.text(offset - 150, offset, max_air_height, f"⚠️ Limit: {int(max_air_height)} mm", color='#ef4444', weight='bold')
+
+    # วาดเส้นกรอบระนาบเพดานสูงสุดลอยอยู่ด้านบนสุดแบบโปร่งสายตา ไม่ตัดผ่านตัวกล่อง
+    ax.plot([0, pallet_w, pallet_w, 0, 0], [0, 0, pallet_l, pallet_l, 0], max_air_height, color='#ef4444', linestyle='--', linewidth=1)
+
+    # จัดมุมมองทัศนียภาพ
+    ax.view_init(elev=24, azim=-125)
     
-    # ตั้งค่าขอบเขตแกน
+    # ตั้งขอบเขตสเกลแกนกราฟ
     max_dim = max(pallet_w, pallet_l, max_air_height)
-    ax.set_xlim(-50, max_dim + 50)
-    ax.set_ylim(-50, max_dim + 50)
+    ax.set_xlim(-100, max_dim + 50)
+    ax.set_ylim(-100, max_dim + 50)
     ax.set_zlim(0, max_dim + 50)
     
     ax.set_xlabel('Width (mm)', fontsize=10)
     ax.set_ylabel('Length (mm)', fontsize=10)
     ax.set_zlabel('Height (mm)', fontsize=10)
     
-    # ทำเครื่องหมายสเกลความสูงบนแกน Z 
-    ax.set_zticks([0, pallet_h, params["TOTAL_HEIGHT"], max_air_height])
-    ax.set_zticklabels([0, f"Pallet H ({int(pallet_h)})", f"Cargo H ({int(params['TOTAL_HEIGHT'])})", f"Limit ({int(max_air_height)})"], fontsize=9, weight='bold')
+    # ปิดตัวสเกลหลักของแกน Z เดิมทิ้งไป เพื่อใช้ตัว Text ที่เราจัดตำแหน่งแยกเพื่อไม่ให้ซ้อนกัน
+    ax.set_zticks([]) 
+    
+    # ปิดพื้นหลังตารางสีเทา (Panes) เพื่อความสะอาดตา ไม่ลายเส้นตัดกับกล่อง
+    ax.xaxis.pane.fill = False; ax.yaxis.pane.fill = False; ax.zaxis.pane.fill = False
+    ax.grid(False)
     
     plt.tight_layout()
     return fig
@@ -206,11 +213,11 @@ with col1:
     m2.metric("จำนวนชั้น", f"{res['MAX_LAYERS']} ชั้น")
     m3.metric("ความสูงรวม", f"{res['TOTAL_HEIGHT']} mm")
     
-    tab1_1, tab1_2 = st.tabs(["🔝 Top View (SVG)", "📐 Solid 3D Isometric"])
+    tab1_1, tab1_2 = st.tabs(["🔝 Top View (SVG)", "📐 Perfect 3D Isometric"])
     with tab1_1:
         st.write(generate_svg_pallet_layer(res, "#16a34a"), unsafe_allow_html=True)
     with tab1_2:
-        st.pyplot(generate_solid_3d_view(res, "#16a34a"))
+        st.pyplot(generate_perfect_3d_view(res, "#16a34a"))
 
 with col2:
     st.subheader("🔵 แบบที่ 2: ทางเลือกที่ดีที่สุด (Alternative)")
@@ -221,11 +228,11 @@ with col2:
     m5.metric("จำนวนชั้น", f"{res['MAX_LAYERS']} ชั้น")
     m6.metric("ความสูงรวม", f"{res['TOTAL_HEIGHT']} mm")
     
-    tab2_1, tab2_2 = st.tabs(["🔝 Top View (SVG)", "📐 Solid 3D Isometric"])
+    tab2_1, tab2_2 = st.tabs(["🔝 Top View (SVG)", "📐 Perfect 3D Isometric"])
     with tab2_1:
         st.write(generate_svg_pallet_layer(res, "#2563eb"), unsafe_allow_html=True)
     with tab2_2:
-        st.pyplot(generate_solid_3d_view(res, "#2563eb"))
+        st.pyplot(generate_perfect_3d_view(res, "#2563eb"))
 
 st.write("---")
 if alt_cases[0]["TOTAL_BOXES"] > normal_cases[0]["TOTAL_BOXES"]:
