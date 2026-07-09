@@ -159,7 +159,7 @@ def generate_2d_side_views(params, color_theme, view_type='front'):
     plt.tight_layout()
     return fig
 
-# --- PLOTLY 3D ENGINE (TRUE 3D - NO OVERLAPPING LINES) ---
+# --- PLOTLY 3D ENGINE (ปรับปรุง: ปิดแสงเงา และล็อกสเกลมิติจริง) ---
 def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color):
     fig.add_trace(go.Mesh3d(
         x=[x, x+dx, x+dx, x, x, x+dx, x+dx, x],
@@ -168,14 +168,28 @@ def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color):
         i=[7, 0, 0, 0, 4, 4, 3, 3, 0, 0, 1, 1],
         j=[3, 4, 1, 2, 5, 6, 2, 7, 5, 4, 2, 6],
         k=[0, 7, 2, 3, 6, 7, 1, 6, 1, 5, 6, 5],
-        color=color, opacity=1.0, flatshading=True, showscale=False
+        color=color, 
+        opacity=1.0, 
+        flatshading=True, 
+        showscale=False,
+        # --- ลบแสงเงาหลอกตา ออกไปทั้งหมดให้สีกล่องเนียนเสมอกัน ---
+        lighting=dict(
+            ambient=1.0,      # แสงสว่างรอบตัวเต็มที่ สีจะไม่ดรอป
+            diffuse=0.0,      # ปิดแสงสะท้อนฉาก
+            specular=0.0,     # ปิดจุดสะท้อนเงาแวววาว
+            roughness=1.0,    # ตั้งค่าผิวให้ด้านที่สุด
+            fresnel=0.0
+        ),
+        lightposition=dict(x=0, y=0, z=0)
     ))
+    
+    # วาดเส้นขอบกล่อง (Wireframe)
     for edge in [
         ([x, x+dx], [y, y], [z, z]), ([x, x], [y, y+dy], [z, z]), ([x+dx, x+dx], [y, y+dy], [z, z]), ([x, x+dx], [y+dy, y+dy], [z, z]),
         ([x, x+dx], [y, y], [z+dz, z+dz]), ([x, x], [y, y+dy], [z+dz, z+dz]), ([x+dx, x+dx], [y, y+dy], [z+dz, z+dz]), ([x, x+dx], [y+dy, y+dy], [z+dz, z+dz]),
         ([x, x], [y, y], [z, z+dz]), ([x+dx, x+dx], [y, y], [z, z+dz]), ([x, x], [y+dy, y+dy], [z, z+dz]), ([x+dx, x+dx], [y+dy, y+dy], [z, z+dz])
     ]:
-        fig.add_trace(go.Scatter3d(x=edge[0], y=edge[1], z=edge[2], mode='lines', line=dict(color=line_color, width=2), showlegend=False))
+        fig.add_trace(go.Scatter3d(x=edge[0], y=edge[1], z=edge[2], mode='lines', line=dict(color=line_color, width=2.5), showlegend=False))
 
 def generate_plotly_3d(params, color_theme, edge_theme):
     if params["TOTAL_BOXES"] == 0:
@@ -200,19 +214,28 @@ def generate_plotly_3d(params, color_theme, edge_theme):
     # วาดแผ่นระนาบเพดาน Limit แดงโปร่งแสง
     fig.add_trace(go.Mesh3d(
         x=[0, pallet_w, pallet_w, 0], y=[0, 0, pallet_l, pallet_l], z=[max_air_height]*4,
-        color='#ef4444', opacity=0.15, name='Limit Height'
+        color='#ef4444', opacity=0.12, name='Limit Height'
     ))
+    
+    # คำนวณช่วงสูงสุดของแกนเพื่อใช้คุมระยะการมองเห็น
+    max_range_val = max(pallet_w, pallet_l, max_air_height) + 100
     
     fig.update_layout(
         scene=dict(
-            xaxis=dict(title='Width (mm)', range=[-100, max(pallet_w, max_air_height)+100]),
-            yaxis=dict(title='Length (mm)', range=[-100, max(pallet_l, max_air_height)+100]),
-            zaxis=dict(title='Height (mm)', range=[0, max_air_height+100]),
-            aspectmode='data'
+            xaxis=dict(title='Width (mm)', range=[-100, max_range_val]),
+            yaxis=dict(title='Length (mm)', range=[-100, max_range_val]),
+            zaxis=dict(title='Height (mm)', range=[0, max_range_val]),
+            # --- บังคับให้สเกลแกน X, Y, Z สมส่วนเท่ากันจริงตามหน่วยมิลลิเมตร (True Proportion) ---
+            aspectmode='manual',
+            aspectratio=dict(
+                x=pallet_w / max_range_val,
+                y=pallet_l / max_range_val,
+                z=max_air_height / max_range_val
+            )
         ),
         margin=dict(r=0, l=0, b=0, t=30),
         showlegend=False,
-        height=550
+        height=600
     )
     return fig
 
