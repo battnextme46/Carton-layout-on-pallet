@@ -4,13 +4,13 @@ import matplotlib.pyplot as plt
 
 # --- การตั้งค่าหน้าเว็บ ---
 st.set_page_config(
-    page_title="Carton Palletizing Optimizer V5.1", 
+    page_title="Carton Palletizing Optimizer V5.2", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("📦 Carton Palletizing Layout Optimizer (Version 5.1)")
-st.write("เครื่องมือวิเคราะห์การจัดวางกล่องเวอร์ชันแก้ไขตัวหนังสือในกล่องและบั๊กฟอนต์ภาษาไทยในกราฟ Side View")
+st.title("📦 Carton Palletizing Layout Optimizer (Version 5.2)")
+st.write("เครื่องมือวิเคราะห์การจัดวางกล่องเวอร์ชันปรับตำแหน่งตัวเลขมิติกล่องให้ชิดขอบเพื่อความชัดเจนในการดูทิศทาง")
 
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("1. ข้อมูลกล่องสินค้า (mm)")
@@ -87,7 +87,7 @@ normal_cases.sort(key=lambda x: (x['TOTAL_BOXES'], -x['TOTAL_HEIGHT']), reverse=
 alt_cases.sort(key=lambda x: (x['TOTAL_BOXES'], -x['TOTAL_HEIGHT']), reverse=True)
 all_ordered_cases = normal_cases + alt_cases
 
-# --- SVG VISUALIZATION ENGINE (2D Top View - Fixed Labels) ---
+# --- SVG VISUALIZATION ENGINE (2D Top View - Precision Label Positioning) ---
 def generate_svg_pallet_layer(params, color_theme):
     if params["TOTAL_BOXES"] == 0:
         return f'<svg width="100%" height="auto" viewBox="0 0 1000 800" xmlns="http://www.w3.org/2000/svg"><rect width="1000" height="800" fill="#f8fafc" stroke="#ef4444" stroke-width="4"/><text x="500" y="400" font-size="40" fill="#ef4444" text-anchor="middle">ไม่สามารถจัดวางได้</text></svg>'
@@ -107,16 +107,20 @@ def generate_svg_pallet_layer(params, color_theme):
         for j in range(sl):
             x, y = ox + i * (bw + box_tolerance), oy + j * (bl + box_tolerance)
             svg += f'<rect x="{x}" y="{y}" width="{bw}" height="{bl}" fill="#ffedd5" stroke="#ea580c" stroke-width="2" rx="4" />'
-            # แก้ไขกลับมาเป็น กว้าง * ยาว ของมิติกล่องที่ถูกเลือกจัดวางในด้านนั้นๆ
-            svg += f'<text x="{x + bw/2}" y="{y + bl/2 - 5}" font-size="18" font-weight="bold" fill="#9a3412" text-anchor="middle">{int(bw)}</text>'
-            svg += f'<text x="{x + bw/2}" y="{y + bl/2 + 20}" font-size="18" font-weight="bold" fill="#9a3412" text-anchor="middle">{int(bl)}</text>'
+            
+            # --- ปรับตำแหน่งตัวเลขเข้าหาขอบด้านของตัวเอง ---
+            # ตัวเลขด้านกว้าง (Horizontal) ขยับขึ้นด้านบนชิดขอบกล่อง (y + 25)
+            svg += f'<text x="{x + bw/2}" y="{y + 25}" font-size="16" font-weight="bold" fill="#c2410c" text-anchor="middle">{int(bw)}</text>'
+            
+            # ตัวเลขด้านยาว (Vertical) ขยับไปทางขวาชิดขอบกล่อง (x + bw - 10) และหมุนตั้งฉากเพื่อให้ขนานไปกับขอบตามแบบวิศวกรรม
+            svg += f'<text x="{x + bw - 12}" y="{y + bl/2}" font-size="16" font-weight="bold" fill="#475569" text-anchor="middle" transform="rotate(-90, {x + bw - 12}, {y + bl/2})">{int(bl)}</text>'
+            
     svg += '</svg>'
     return svg
 
-# --- 2D SIDE VIEW ENGINE (MATPLOTLIB - Fixed Font Bug) ---
+# --- 2D SIDE VIEW ENGINE (MATPLOTLIB) ---
 def generate_2d_side_views(params, color_theme, view_type='front'):
     fig, ax = plt.subplots(figsize=(8, 5))
-    
     layers = params["MAX_LAYERS"]
     bh = params["BH_USED"]
     
@@ -125,7 +129,6 @@ def generate_2d_side_views(params, color_theme, view_type='front'):
         slots = params["SLOTS_W"]
         bw = params["BW_USED"]
         ox = (pallet_w - params["USED_W"]) / 2
-        # เปลี่ยนเป็นภาษาอังกฤษ เพื่อตัดบั๊กฟอนต์ภาษาไทยสี่เหลี่ยม / ท ท ท ท บน Linux Server ของ Streamlit Cloud
         ax.set_title("Front View (Pallet Width W Axis)", fontsize=12, weight='bold')
         ax.set_xlabel("Width (mm)")
     else:
@@ -136,22 +139,18 @@ def generate_2d_side_views(params, color_theme, view_type='front'):
         ax.set_title("Side View (Pallet Length L Axis)", fontsize=12, weight='bold')
         ax.set_xlabel("Length (mm)")
         
-    # วาดหน้าตัดพาเลทด้านล่าง
     ax.add_patch(plt.Rectangle((0, 0), total_dim, pallet_h, color='#cbd5e1', edgecolor='#475569', lw=1.5))
     ax.text(total_dim/2, pallet_h/2, f"Pallet H: {int(pallet_h)} mm", ha='center', va='center', color='#334155', weight='bold', fontsize=9)
     
-    # วาดกองกล่องเรียงบล็อกตามพิกัดจริง
     for k in range(layers):
         gz = pallet_h + (k * bh)
         for i in range(slots):
             gx = ox + i * (bw + box_tolerance)
             ax.add_patch(plt.Rectangle((gx, gz), bw, bh, facecolor='#ffedd5', edgecolor='#ea580c', lw=1.2))
             
-    # วาดเส้น Limit ความสูงและระดับจริง
     ax.axhline(y=max_air_height, color='#ef4444', linestyle='--', linewidth=2, label=f"Limit Limit ({int(max_air_height)} mm)")
     ax.axhline(y=params["TOTAL_HEIGHT"], color=color_theme, linestyle='-', linewidth=2, label=f"Cargo Height ({int(params['TOTAL_HEIGHT'])} mm)")
     
-    # ตั้งค่ารายละเอียดแกน
     ax.set_xlim(-50, total_dim + 50)
     ax.set_ylim(0, max_air_height + 150)
     ax.set_ylabel("Height (mm)")
