@@ -1,18 +1,18 @@
 import streamlit as st
 import math
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+import plotly.graph_objects as go
 import numpy as np
 
 # --- การตั้งค่าหน้าเว็บ ---
 st.set_page_config(
-    page_title="Carton Palletizing Optimizer 3D", 
+    page_title="Carton Palletizing Optimizer V4", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("📦 Carton Palletizing Layout Optimizer (Solid 3D V3)")
-st.write("เครื่องมือวิเคราะห์การจัดวางกล่องสินค้าบนพาเลทเวอร์ชันแก้ไขบั๊กการแสดงผลซ้อนทับ (Z-Order Fixed)")
+st.title("📦 Carton Palletizing Layout Optimizer (Version 4.0)")
+st.write("เครื่องมือวิเคราะห์การจัดวางกล่องเวอร์ชันแก้ไขปัญหาเส้นทะลุด้วยระบบ 2D Side View & Plotly 3D")
 
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("1. ข้อมูลกล่องสินค้า (mm)")
@@ -109,136 +109,154 @@ def generate_svg_pallet_layer(params, color_theme):
         for j in range(sl):
             x, y = ox + i * (bw + box_tolerance), oy + j * (bl + box_tolerance)
             svg += f'<rect x="{x}" y="{y}" width="{bw}" height="{bl}" fill="#ffedd5" stroke="#ea580c" stroke-width="2" rx="4" />'
-            label_w = f"W:{int(bw)}" if (i==0 and j==0) else f"{int(bw)}"
-            label_l = f"L:{int(bl)}" if (i==0 and j==0) else f"{int(bl)}"
-            svg += f'<text x="{x + bw/2}" y="{y + bl/2 - 5}" font-size="18" font-weight="bold" fill="#9a3412" text-anchor="middle">{label_w}</text>'
-            svg += f'<text x="{x + bw/2}" y="{y + bl/2 + 20}" font-size="18" font-weight="bold" fill="#9a3412" text-anchor="middle">{label_l}</text>'
+            svg += f'<text x="{x + bw/2}" y="{y + bl/2 + 5}" font-size="20" font-weight="bold" fill="#9a3412" text-anchor="middle">{i+1},{j+1}</text>'
     svg += '</svg>'
     return svg
 
-# --- FIXED V3: MATPLOTLIB 3D ENGINE (NO LINE OVERLAPPING) ---
-def draw_3d_perfect_box(ax, x, y, z, bw, bl, bh, fill_color, edge_color):
-    corners = np.array([
-        [x, y, z], [x + bw, y, z], [x + bw, y + bl, z], [x, y + bl, z],
-        [x, y, z + bh], [x + bw, y, z + bh], [x + bw, y + bl, z + bh], [x, y + bl, z + bh]
-    ])
-    faces = [
-        [corners[0], corners[1], corners[2], corners[3]], # Bottom
-        [corners[4], corners[5], corners[6], corners[7]], # Top
-        [corners[0], corners[1], corners[5], corners[4]], # Side 1
-        [corners[1], corners[2], corners[6], corners[5]], # Side 2
-        [corners[2], corners[3], corners[7], corners[6]], # Side 3
-        [corners[3], corners[0], corners[4], corners[7]]  # Side 4
-    ]
-    # ปรับแต่งความทึบแสงและปิดแสงเงาหลอกตา (shade=False) เพื่อตัดปัญหาเส้นซ้อนทับของหน้าสัมผัส
-    collection = Poly3DCollection(faces, facecolors=fill_color, linewidths=1.2, edgecolors=edge_color, shade=False)
-    ax.add_collection3d(collection)
-
-def generate_perfect_3d_view(params, pallet_color):
-    if params["TOTAL_BOXES"] == 0:
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection='3d')
-        ax.text(0.5, 0.5, "ไม่สามารถจัดวางได้", color='red', fontsize=14, ha='center')
-        ax.set_axis_off()
-        return fig
-
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111, projection='3d')
+# --- IDEA 1: 2D SIDE VIEW ENGINE (MATPLOTLIB) ---
+def generate_2d_side_views(params, color_theme, view_type='front'):
+    fig, ax = plt.subplots(figsize=(8, 5))
     
+    layers = params["MAX_LAYERS"]
+    bh = params["BH_USED"]
+    
+    if view_type == 'front':
+        # มองจากด้านหน้า: แกน X คือ ความกว้างพาเลท (Pallet W), แกน Y คือความสูง
+        total_dim = pallet_w
+        slots = params["SLOTS_W"]
+        bw = params["BW_USED"]
+        ox = (pallet_w - params["USED_W"]) / 2
+        ax.set_title("Front View (มองจากด้านกว้าง)", fontsize=12, weight='bold')
+        ax.set_xlabel("Width (mm)")
+    else:
+        # มองจากด้านข้าง: แกน X คือ ความยาวพาเลท (Pallet L), แกน Y คือความสูง
+        total_dim = pallet_l
+        slots = params["SLOTS_L"]
+        bw = params["BL_USED"]
+        ox = (pallet_l - params["USED_L"]) / 2
+        ax.set_title("Side View (มองจากด้านยาว)", fontsize=12, weight='bold')
+        ax.set_xlabel("Length (mm)")
+        
+    # วาดพาเลท 2D ข้างล่าง
+    ax.add_patch(plt.Rectangle((0, 0), total_dim, pallet_h, color='#cbd5e1', edgecolor='#475569', lw=1.5))
+    ax.text(total_dim/2, pallet_h/2, f"Pallet H: {int(pallet_h)} mm", ha='center', va='center', color='#334155', weight='bold', fontsize=9)
+    
+    # วาดโครงกล่องตามจำนวนชิ้นจริงในมุมมองนั้นๆ
+    for k in range(layers):
+        gz = pallet_h + (k * bh)
+        for i in range(slots):
+            gx = ox + i * (bw + box_tolerance)
+            ax.add_patch(plt.Rectangle((gx, gz), bw, bh, facecolor='#ffedd5', edgecolor='#ea580c', lw=1.2))
+            
+    # วาดเส้น Limit Cargo ด้านบนแบบ 2D ทึบชัดเจน ไม่มีอะไรบัง!
+    ax.axhline(y=max_air_height, color='#ef4444', linestyle='--', linewidth=2, label=f"Limit Limit ({int(max_air_height)} mm)")
+    ax.axhline(y=params["TOTAL_HEIGHT"], color=color_theme, linestyle='-', linewidth=2, label=f"Cargo Height ({int(params['TOTAL_HEIGHT'])} mm)")
+    
+    # ปรับสเกลหน้าจอ
+    ax.set_xlim(-50, total_dim + 50)
+    ax.set_ylim(0, max_air_height + 150)
+    ax.set_ylabel("Height (mm)")
+    ax.grid(axis='y', linestyle=':', alpha=0.6)
+    ax.legend(loc='upper right')
+    
+    plt.tight_layout()
+    return fig
+
+# --- IDEA 2: PLOTLY 3D ENGINE (TRUE 3D - NO OVERLAPPING LINES) ---
+def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color):
+    # ฟังก์ชันวาดกล่องทึบใน Plotly 3D (ไม่มีปัญหาสายตาทะลุแน่นอนเพราะใช้ WebGL)
+    fig.add_trace(go.Mesh3d(
+        x=[x, x+dx, x+dx, x, x, x+dx, x+dx, x],
+        y=[y, y, y+dy, y+dy, y, y, y+dy, y+dy],
+        z=[z, z, z, z, z+dz, z+dz, z+dz, z+dz],
+        i=[7, 0, 0, 0, 4, 4, 3, 3, 0, 0, 1, 1],
+        j=[3, 4, 1, 2, 5, 6, 2, 7, 5, 4, 2, 6],
+        k=[0, 7, 2, 3, 6, 7, 1, 6, 1, 5, 6, 5],
+        color=color, opacity=1.0, flatshading=True, showscale=False
+    ))
+    # เพิ่มเส้นขอบกล่อง
+    for edge in [
+        ([x, x+dx], [y, y], [z, z]), ([x, x], [y, y+dy], [z, z]), ([x+dx, x+dx], [y, y+dy], [z, z]), ([x, x+dx], [y+dy, y+dy], [z, z]),
+        ([x, x+dx], [y, y], [z+dz, z+dz]), ([x, x], [y, y+dy], [z+dz, z+dz]), ([x+dx, x+dx], [y, y+dy], [z+dz, z+dz]), ([x, x+dx], [y+dy, y+dy], [z+dz, z+dz]),
+        ([x, x], [y, y], [z, z+dz]), ([x+dx, x+dx], [y, y], [z, z+dz]), ([x, x], [y+dy, y+dy], [z, z+dz]), ([x+dx, x+dx], [y+dy, y+dy], [z, z+dz])
+    ]:
+        fig.add_trace(go.Scatter3d(x=edge[0], y=edge[1], z=edge[2], mode='lines', line=dict(color=line_color, width=2), showlegend=False))
+
+def generate_plotly_3d(params, color_theme, edge_theme):
+    if params["TOTAL_BOXES"] == 0:
+        return None
+        
+    fig = go.Figure()
     sw, sl, layers = params["SLOTS_W"], params["SLOTS_L"], params["MAX_LAYERS"]
     bw, bl, bh = params["BW_USED"], params["BL_USED"], params["BH_USED"]
+    ox, oy = (pallet_w - params["USED_W"]) / 2, (pallet_l - params["USED_L"]) / 2
     
-    ox = (pallet_w - params["USED_W"]) / 2
-    oy = (pallet_l - params["USED_L"]) / 2
-
-    # --- 1. วาดพาเลทไว้ที่ชั้นแรกสุดใต้กล่อง ---
-    draw_3d_perfect_box(ax, 0, 0, 0, pallet_w, pallet_l, pallet_h, "#cbd5e1", pallet_color)
+    # 1. วาดพาเลท
+    draw_plotly_cube(fig, 0, 0, 0, pallet_w, pallet_l, pallet_h, '#cbd5e1', '#475569')
     
-    # --- 2. วาดกล่องโดยแก้ปัญหา Occlusion (จากลึกสุดมาตื้นสุด) ---
-    # สำหรับมุมมอง azim=-125 วัตถุที่อยู่ลึกที่สุดคือแถว j=0 และ i=0 
-    # ดังนั้นลูปปกติไล่จาก 0 ไปยัง sl และ sw จะช่วยให้กล่องชิ้นหน้าสุดวาดทับชิ้นหลังได้อย่างถูกต้องตามธรรมชาติ
+    # 2. วาดกล่องทั้งหมดทีละใบ
     for k in range(layers):
         gz = pallet_h + (k * bh)
         for j in range(sl):
             gy = oy + j * (bl + box_tolerance)
             for i in range(sw):
                 gx = ox + i * (bw + box_tolerance)
-                draw_3d_perfect_box(ax, gx, gy, gz, bw, bl, bh, "#ffedd5", "#ea580c")
+                draw_plotly_cube(fig, gx, gy, gz, bw, bl, bh, color_theme, edge_theme)
+                
+    # 3. วาดแผ่นระนาบเพดาน Limit แดงโปร่งแสงลอยอยู่ข้างบนสุด
+    fig.add_trace(go.Mesh3d(
+        x=[0, pallet_w, pallet_w, 0], y=[0, 0, pallet_l, pallet_l], z=[max_air_height]*4,
+        color='#ef4444', opacity=0.2, name=f'Limit {int(max_air_height)}mm'
+    ))
     
-    # --- 3. แก้ไขจุดวงสีม่วงเรื่องเส้นลิมิตพาดผ่านและข้อความทับกัน ---
-    # ดึงเส้นกรอบลิมิตและเสาออกมาไว้นอกพื้นที่โมเดลสินค้า (ขยับแกนออกไปทางลบเล็กน้อย เพื่อไม่ให้ตัดผ่านกล่อง)
-    offset = -80
-    ax.plot([offset, offset], [offset, offset], [0, max_air_height], color='#ef4444', linestyle='-', linewidth=2.5)
-    
-    # ขยับข้อความแกน Z ให้แยกห่างกัน ไม่ให้ทับซ้อนกันแบบจุดสีม่วงมุมซ้ายบน
-    ax.text(offset - 150, offset, pallet_h, f"Pallet H: {int(pallet_h)} mm", color='#475569', weight='bold')
-    ax.text(offset - 150, offset, params["TOTAL_HEIGHT"], f"Cargo H: {int(params['TOTAL_HEIGHT'])} mm", color=pallet_color, weight='bold')
-    ax.text(offset - 150, offset, max_air_height, f"⚠️ Limit: {int(max_air_height)} mm", color='#ef4444', weight='bold')
-
-    # วาดเส้นกรอบระนาบเพดานสูงสุดลอยอยู่ด้านบนสุดแบบโปร่งสายตา ไม่ตัดผ่านตัวกล่อง
-    ax.plot([0, pallet_w, pallet_w, 0, 0], [0, 0, pallet_l, pallet_l, 0], max_air_height, color='#ef4444', linestyle='--', linewidth=1)
-
-    # จัดมุมมองทัศนียภาพ
-    ax.view_init(elev=24, azim=-125)
-    
-    # ตั้งขอบเขตสเกลแกนกราฟ
-    max_dim = max(pallet_w, pallet_l, max_air_height)
-    ax.set_xlim(-100, max_dim + 50)
-    ax.set_ylim(-100, max_dim + 50)
-    ax.set_zlim(0, max_dim + 50)
-    
-    ax.set_xlabel('Width (mm)', fontsize=10)
-    ax.set_ylabel('Length (mm)', fontsize=10)
-    ax.set_zlabel('Height (mm)', fontsize=10)
-    
-    # ปิดตัวสเกลหลักของแกน Z เดิมทิ้งไป เพื่อใช้ตัว Text ที่เราจัดตำแหน่งแยกเพื่อไม่ให้ซ้อนกัน
-    ax.set_zticks([]) 
-    
-    # ปิดพื้นหลังตารางสีเทา (Panes) เพื่อความสะอาดตา ไม่ลายเส้นตัดกับกล่อง
-    ax.xaxis.pane.fill = False; ax.yaxis.pane.fill = False; ax.zaxis.pane.fill = False
-    ax.grid(False)
-    
-    plt.tight_layout()
+    # ตั้งค่า Layout และมิติแกนกราฟ
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(title='Width (mm)', range=[-100, max(pallet_w, max_air_height)+100]),
+            yaxis=dict(title='Length (mm)', range=[-100, max(pallet_l, max_air_height)+100]),
+            zaxis=dict(title='Height (mm)', range=[0, max_air_height+100]),
+            aspectmode='data'
+        ),
+        margin=dict(r=0, l=0, b=0, t=30),
+        showlegend=False,
+        height=550
+    )
     return fig
 
-# --- PRESENTATION & LAYOUT SYSTEM ---
+# --- PRESENTATION SYSTEM (STREAMLIT TABS) ---
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("🟢 แบบที่ 1: การจัดเรียงปกติ (H ขึ้น)")
-    res = normal_cases[0]
+    res1 = normal_cases[0]
+    st.metric("จำนวนรวม", f"{res1['TOTAL_BOXES']} ใบ", f"สูง {res1['TOTAL_HEIGHT']} mm")
     
-    m1, m2, m3 = st.columns(3)
-    m1.metric("จำนวนรวม", f"{res['TOTAL_BOXES']} ใบ")
-    m2.metric("จำนวนชั้น", f"{res['MAX_LAYERS']} ชั้น")
-    m3.metric("ความสูงรวม", f"{res['TOTAL_HEIGHT']} mm")
-    
-    tab1_1, tab1_2 = st.tabs(["🔝 Top View (SVG)", "📐 Perfect 3D Isometric"])
-    with tab1_1:
-        st.write(generate_svg_pallet_layer(res, "#16a34a"), unsafe_allow_html=True)
-    with tab1_2:
-        st.pyplot(generate_perfect_3d_view(res, "#16a34a"))
+    t1, t2, t3 = st.tabs(["🔝 Top View", "📐 2D Side Views", "🌐 Interactive 3D (Plotly)"])
+    with t1:
+        st.write(generate_svg_pallet_layer(res1, "#16a34a"), unsafe_allow_html=True)
+    with t2:
+        sub_c1, sub_c2 = st.columns(2)
+        sub_c1.pyplot(generate_2d_side_views(res1, "#16a34a", 'front'))
+        sub_c2.pyplot(generate_2d_side_views(res1, "#16a34a", 'side'))
+    with t3:
+        p_fig1 = generate_plotly_3d(res1, '#ffedd5', '#ea580c')
+        if p_fig1: st.plotly_chart(p_fig1, use_container_width=True)
 
 with col2:
     st.subheader("🔵 แบบที่ 2: ทางเลือกที่ดีที่สุด (Alternative)")
-    res = alt_cases[0]
+    res2 = alt_cases[0]
+    st.metric("จำนวนรวม", f"{res2['TOTAL_BOXES']} ใบ", f"สูง {res2['TOTAL_HEIGHT']} mm")
     
-    m4, m5, m6 = st.columns(3)
-    m4.metric("จำนวนรวม", f"{res['TOTAL_BOXES']} ใบ")
-    m5.metric("จำนวนชั้น", f"{res['MAX_LAYERS']} ชั้น")
-    m6.metric("ความสูงรวม", f"{res['TOTAL_HEIGHT']} mm")
-    
-    tab2_1, tab2_2 = st.tabs(["🔝 Top View (SVG)", "📐 Perfect 3D Isometric"])
-    with tab2_1:
-        st.write(generate_svg_pallet_layer(res, "#2563eb"), unsafe_allow_html=True)
-    with tab2_2:
-        st.pyplot(generate_perfect_3d_view(res, "#2563eb"))
-
-st.write("---")
-if alt_cases[0]["TOTAL_BOXES"] > normal_cases[0]["TOTAL_BOXES"]:
-    st.success(f"🔥 **แนะนำทางเลือกอื่นๆ (Alternative):** สามารถเพิ่มจำนวนกล่องได้อีก **{alt_cases[0]['TOTAL_BOXES'] - normal_cases[0]['TOTAL_BOXES']} ใบ** ต่อพาเลท!")
-else:
-    st.info("💡 **แนะนำแบบจัดเรียงปกติ (Normal Case):** ได้ปริมาณกล่องสูงสุดและจัดเรียงได้ง่ายที่สุดครับ")
+    t4, t5, t6 = st.tabs(["🔝 Top View", "📐 2D Side Views", "🌐 Interactive 3D (Plotly)"])
+    with t4:
+        st.write(generate_svg_pallet_layer(res2, "#2563eb"), unsafe_allow_html=True)
+    with t5:
+        sub_c3, sub_c4 = st.columns(2)
+        sub_c3.pyplot(generate_2d_side_views(res2, "#2563eb", 'front'))
+        sub_c4.pyplot(generate_2d_side_views(res2, "#2563eb", 'side'))
+    with t6:
+        p_fig2 = generate_plotly_3d(res2, '#dbeafe', '#2563eb')
+        if p_fig2: st.plotly_chart(p_fig2, use_container_width=True)
 
 st.write("---")
 st.subheader("📊 ตารางสรุป 6 ทิศทาง")
