@@ -176,7 +176,7 @@ with col1:
         st.pyplot(generate_2d_side_views(res1, "#16a34a", 'side'))
 
 with col2:
-    st.subheader("🔵 แบบที่ 2: ทางเลือกที่ดีที่สุด (Alternative)")
+    st.subheader("🔵 แบบที่ 2: ทางเลือกอื่นๆ (Alternative)")
     res2 = alt_cases[0]
     st.metric("จำนวนรวม", f"{res2['TOTAL_BOXES']} ใบ", f"สูงรวม {res2['TOTAL_HEIGHT']} mm")
     
