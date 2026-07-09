@@ -148,8 +148,8 @@ def generate_2d_side_views(params, color_theme, view_type='front'):
             gx = ox + i * (bw + box_tolerance)
             ax.add_patch(plt.Rectangle((gx, gz), bw, bh, facecolor='#ffedd5', edgecolor='#ea580c', lw=1.2))
             
-    ax.axhline(y=max_air_height, color='#ef4444', linestyle='--', linewidth=2, label=f"Limit Limit ({int(max_air_height)} mm)")
-    ax.axhline(y=params["TOTAL_HEIGHT"], color=color_theme, linestyle='-', linewidth=2, label=f"Cargo Height ({int(params['TOTAL_HEIGHT'])} mm)")
+    ax.axhline(y=max_air_height, color='#ef4444', linestyle='--', linewidth=2, label=f"Limit Cargo ({int(max_air_height)} mm)")
+    ax.axhline(y=params["TOTAL_HEIGHT"], color=color_theme, linestyle='-', linewidth=2, label=f"Product Height ({int(params['TOTAL_HEIGHT'])} mm)")
     
     ax.set_xlim(-50, total_dim + 50)
     ax.set_ylim(0, max_air_height + 150)
