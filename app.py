@@ -11,10 +11,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("📦 Carton Palletizing Layout Optimizer (6-Way & 3D)")
-st.write("เครื่องมือวิเคราะห์การจัดวางกล่องบนพาเลทแบบ 6 ทิศทาง พร้อมการจำลองมุมมอง Isometric 3D เพื่อดูความสูง")
+st.title("📦 Carton Palletizing Layout Optimizer (6-Way & True 3D)")
+st.write("เครื่องมือวิเคราะห์การจัดวางกล่องบนพาเลทแบบ 6 ทิศทาง พร้อมการจำลองมุมมองแบบเห็นจำนวนกล่องจริง")
 
-# --- SIDEBAR INPUTS (แถบเมนูด้านซ้าย) ---
+# --- SIDEBAR INPUTS ---
 st.sidebar.header("1. ข้อมูลกล่องสินค้า (mm)")
 box_w = st.sidebar.number_input("ความกว้างกล่อง (Width - W)", value=330.0, step=10.0)
 box_l = st.sidebar.number_input("ความยาวกล่อง (Length - L)", value=303.0, step=10.0)
@@ -30,7 +30,7 @@ st.sidebar.header("3. ระยะเผื่อ (Tolerances - mm)")
 box_tolerance = st.sidebar.slider("ระยะเผื่อระหว่างกล่อง", 0.0, 10.0, 2.0, step=0.5)
 overhang_allowance = st.sidebar.slider("ระยะกล่องยื่นนอกขอบ", 0.0, 50.0, 0.0, step=5.0)
 
-# --- CALCULATION ENGINE (คงเดิม) ---
+# --- CALCULATION ENGINE ---
 def calculate_pallet_layout(bw_used, bl_used, bh_used, case_name, is_normal_case):
     effective_box_w = bw_used + box_tolerance
     effective_box_l = bl_used + box_tolerance
@@ -63,7 +63,7 @@ def calculate_pallet_layout(bw_used, bl_used, bh_used, case_name, is_normal_case
         "USED_W": used_w, "USED_L": used_l
     }
 
-# --- ประมวลผลทิศทาง (6-Way) ---
+# ประมวลผลลัพธ์
 dims = [box_w, box_l, box_h]
 dim_names = ['W', 'L', 'H']
 normal_cases, alt_cases = [], []
@@ -85,12 +85,11 @@ for i in range(3):
     else: alt_cases.append(res2)
     case_idx += 1
 
-# เรียงลำดับผลลัพธ์
 normal_cases.sort(key=lambda x: (x['TOTAL_BOXES'], -x['TOTAL_HEIGHT']), reverse=True)
 alt_cases.sort(key=lambda x: (x['TOTAL_BOXES'], -x['TOTAL_HEIGHT']), reverse=True)
 all_ordered_cases = normal_cases + alt_cases
 
-# --- SVG VISUALIZATION ENGINE (2D Top View - คงเดิม) ---
+# --- SVG VISUALIZATION ENGINE (2D Top View) ---
 def generate_svg_pallet_layer(params, color_theme):
     if params["TOTAL_BOXES"] == 0:
         return f'<svg width="100%" height="auto" viewBox="0 0 1000 800" xmlns="http://www.w3.org/2000/svg"><rect width="1000" height="800" fill="#f8fafc" stroke="#ef4444" stroke-width="4"/><text x="500" y="400" font-size="40" fill="#ef4444" text-anchor="middle">ไม่สามารถจัดวางได้</text></svg>'
@@ -101,7 +100,6 @@ def generate_svg_pallet_layer(params, color_theme):
     svg = f'<svg width="100%" height="auto" viewBox="0 0 {view_w} {view_h}" xmlns="http://www.w3.org/2000/svg" style="background-color: #ffffff; border: 2px solid #e2e8f0; border-radius: 12px;">'
     svg += f'<rect x="{pad}" y="{pad}" width="{pallet_w}" height="{pallet_l}" fill="#fcfbf7" stroke="{color_theme}" stroke-width="6" rx="8" />'
     
-    # วาดมิติพาเลท
     svg += f'<text x="{pad + (pallet_w/2)}" y="{view_h - 25}" font-size="30" font-weight="bold" fill="#475569" text-anchor="middle">W: {int(pallet_w)} mm</text>'
     svg += f'<text x="25" y="{pad + (pallet_l/2)}" font-size="30" font-weight="bold" fill="#475569" text-anchor="middle" transform="rotate(-90, 25, {pad + (pallet_l/2)})">L: {int(pallet_l)} mm</text>'
     
@@ -118,14 +116,12 @@ def generate_svg_pallet_layer(params, color_theme):
     svg += '</svg>'
     return svg
 
-# --- NEW: MATPLOTLIB 3D VISUALIZATION ENGINE ---
-def draw_box(ax, x, y, z, bw, bl, bh, color_body="#ffedd5", color_edge="#ea580c"):
-    # ฟังก์ชันวาดกล่อง 1 ใบแบบ 3 มิติ
+# --- IMPROVED: MATPLOTLIB 3D ENGINE (TRUE GRID + VISUAL LIMIT) ---
+def draw_3d_box(ax, x, y, z, bw, bl, bh, fill_color, edge_color, alpha_val=0.85):
     corners = np.array([
-        [x, y, z], [x + bw, y, z], [x + bw, y + bl, z], [x, y + bl, z], # Bottom
-        [x, y, z + bh], [x + bw, y, z + bh], [x + bw, y + bl, z + bh], [x, y + bl, z + bh] # Top
+        [x, y, z], [x + bw, y, z], [x + bw, y + bl, z], [x, y + bl, z],
+        [x, y, z + bh], [x + bw, y, z + bh], [x + bw, y + bl, z + bh], [x, y + bl, z + bh]
     ])
-    
     faces = [
         [corners[0], corners[1], corners[2], corners[3]], # Bottom
         [corners[4], corners[5], corners[6], corners[7]], # Top
@@ -134,78 +130,61 @@ def draw_box(ax, x, y, z, bw, bl, bh, color_body="#ffedd5", color_edge="#ea580c"
         [corners[2], corners[3], corners[7], corners[6]], # Side 3
         [corners[3], corners[0], corners[4], corners[7]]  # Side 4
     ]
-    
-    ax.add_collection3d(Poly3DCollection(faces, facecolors=color_body, linewidths=1, edgecolors=color_edge, alpha=0.9))
+    ax.add_collection3d(Poly3DCollection(faces, facecolors=fill_color, linewidths=0.8, edgecolors=edge_color, alpha=alpha_val))
 
-def generate_3d_isometric_view(params, color_theme):
-    # กรณีจัดวางไม่ได้
-    if params["TOTAL_BOXES"] == 0 or params["MAX_LAYERS"] == 0:
+def generate_true_3d_view(params, pallet_color):
+    if params["TOTAL_BOXES"] == 0:
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection='3d')
-        ax.set_title("ไม่สามารถจำลองภาพ 3D ได้", fontsize=16, color='red')
+        ax.text(0.5, 0.5, "ไม่สามารถจัดวางได้", color='red', fontsize=14, ha='center')
         ax.set_axis_off()
         return fig
 
-    # เตรียม Canvas 3D
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
     
-    # ดึงค่าพารามิเตอร์
     sw, sl, layers = params["SLOTS_W"], params["SLOTS_L"], params["MAX_LAYERS"]
     bw, bl, bh = params["BW_USED"], params["BL_USED"], params["BH_USED"]
     
-    # 1. วาดพาเลท
-    draw_box(ax, 0, 0, 0, pallet_w, pallet_l, pallet_h, color_body="#fcfbf7", color_edge=color_theme)
+    # 1. วาดพาเลทจริง
+    draw_3d_box(ax, 0, 0, 0, pallet_w, pallet_l, pallet_h, "#e2e8f0", pallet_color, alpha_val=0.9)
     
-    # 2. วาดกล่องทีละใบตามชั้น
+    # 2. วาดกล่องทีละใบจริงๆ เพื่อให้เห็นเป็นชั้นและแถวชัดเจน (True Grid)
     ox = (pallet_w - params["USED_W"]) / 2
     oy = (pallet_l - params["USED_L"]) / 2
     
-    # เพื่อป้องกันการโหลดภาพที่นานเกินไป เราจะวาดเฉพาะขอบนอกของกล่องเป็น Block เดียว
-    # (หากต้องการวาดทีละใบจริง ให้ uncomment ลูปนี้)
-    '''
     for k in range(layers):
         gz = pallet_h + (k * bh)
         for i in range(sw):
             gx = ox + i * (bw + box_tolerance)
             for j in range(sl):
                 gy = oy + j * (bl + box_tolerance)
-                draw_box(ax, gx, gy, gz, bw, bl, bh)
-    '''
-    # ทางเลือก: วาดเป็น Block ใหญ่ก้อนเดียว (Representational)
-    block_bw = sw * bw + (sw-1)*box_tolerance
-    block_bl = sl * bl + (sl-1)*box_tolerance
-    draw_box(ax, ox, oy, pallet_h, block_bw, block_bl, layers * bh, color_body="#ffedd5CC", color_edge="#ea580c")
+                # วาดกล่องแยกชิ้น
+                draw_3d_box(ax, gx, gy, gz, bw, bl, bh, "#ffedd5", "#ea580c", alpha_val=0.75)
     
-    # 3. แสดงเส้น Limit และสเกล
-    # เส้น Limit ความสูงสูงสุด (Red dashed line)
-    x = np.linspace(-100, pallet_w + 100, 2)
-    y = np.linspace(-100, pallet_l + 100, 2)
-    X, Y = np.meshgrid(x, y)
-    Z = np.ones_like(X) * max_air_height
-    #ax.plot_surface(X, Y, Z, color='red', alpha=0.1, zorder=0) # แสดงแผ่น limit
-    
-    # เส้น limit สีแดง (Wireframe)
-    ax.plot([0, pallet_w, pallet_w, 0, 0], [0, 0, pallet_l, pallet_l, 0], max_air_height, color='red', linestyle='--', label=f'Limit Height: {int(max_air_height)}mm')
+    # 3. วาดเส้น Limit เสาวัดระยะ (Limit Indicator Pole) ให้เข้าใจง่ายขึ้น
+    # วาดโครงกรอบแสดงลิมิตความสูงสูงสุดตรงมุมพาเลท
+    ax.plot([0, 0], [0, 0], [0, max_air_height], color='#ef4444', linestyle='-', linewidth=2)
+    ax.plot([0, pallet_w, pallet_w, 0, 0], [0, 0, pallet_l, pallet_l, 0], max_air_height, color='#ef4444', linestyle='--', linewidth=1.2)
+    ax.text(0, -100, max_air_height, f"⚠️ Limit: {int(max_air_height)} mm", color='#ef4444', weight='bold', fontsize=10)
 
-    # ปรับแต่งมุมมอง (Isometric-like)
-    ax.view_init(elev=25, azim=-135) # ปรับมุม elevation และ azimuth
+    # ตั้งค่าระนาบและการจัดวางมุมมอง
+    ax.view_init(elev=22, azim=-125)
     
-    # ปรับแกนและสเกล
-    ax.set_xlim(-100, max(pallet_w,pallet_l) + 100)
-    ax.set_ylim(-100, max(pallet_w,pallet_l) + 100)
-    ax.set_zlim(0, max(max_air_height, params["TOTAL_HEIGHT"]) + 200)
+    # คำนวณสเกลขอบเขตการแสดงผล
+    max_dim = max(pallet_w, pallet_l, max_air_height)
+    ax.set_xlim(-50, max_dim + 50)
+    ax.set_ylim(-50, max_dim + 50)
+    ax.set_zlim(0, max_dim + 50)
     
-    ax.set_xlabel('Width (mm)', fontsize=12, labelpad=10)
-    ax.set_ylabel('Length (mm)', fontsize=12, labelpad=10)
-    ax.set_zlabel('Height (mm)', fontsize=12, labelpad=10)
+    # ป้ายชื่อแกน
+    ax.set_xlabel('Width (mm)', fontsize=10)
+    ax.set_ylabel('Length (mm)', fontsize=10)
+    ax.set_zlabel('Height (mm)', fontsize=10)
     
-    # แสดงค่าสเกลบนแกน Z
+    # จุดทำสเกลความสูงบนแกน Z ที่เข้าใจง่าย
     ax.set_zticks([0, pallet_h, params["TOTAL_HEIGHT"], max_air_height])
-    ax.set_zticklabels([0, f"Pallet H:{int(pallet_h)}", f"Cargo H:{int(params['TOTAL_HEIGHT'])}", f"Limit:{int(max_air_height)}"], fontsize=10, weight='bold')
-
-    # ซ่อนเส้น Grid หลังที่ไม่จำเป็น
-    #ax.xaxis.pane.fill = False; ax.yaxis.pane.fill = False; ax.zaxis.pane.fill = False
+    ax.set_zticklabels([0, f"Pallet H ({int(pallet_h)})", f"Cargo H ({int(params['TOTAL_HEIGHT'])})", f"Limit ({int(max_air_height)})"], fontsize=9)
     
     plt.tight_layout()
     return fig
@@ -217,43 +196,37 @@ with col1:
     st.subheader("🟢 แบบที่ 1: การจัดเรียงปกติ (H ขึ้น)")
     res = normal_cases[0]
     
-    # Metrics
     m1, m2, m3 = st.columns(3)
     m1.metric("จำนวนรวม", f"{res['TOTAL_BOXES']} ใบ")
     m2.metric("จำนวนชั้น", f"{res['MAX_LAYERS']} ชั้น")
-    m3.metric("ความสูงรวม (W/Pallet)", f"{res['TOTAL_HEIGHT']} mm")
+    m3.metric("ความสูงรวม", f"{res['TOTAL_HEIGHT']} mm")
     
-    # Tabs สำหรับเลือกมุมมอง
-    tab1_1, tab1_2 = st.tabs(["🔝 Top View (SVG)", "📐 Isometric 3D"])
+    tab1_1, tab1_2 = st.tabs(["🔝 Top View (SVG)", "📐 True 3D Isometric"])
     with tab1_1:
         st.write(generate_svg_pallet_layer(res, "#16a34a"), unsafe_allow_html=True)
     with tab1_2:
-        st.pyplot(generate_3d_isometric_view(res, "#16a34a"))
+        st.pyplot(generate_true_3d_view(res, "#16a34a"))
 
 with col2:
     st.subheader("🔵 แบบที่ 2: ทางเลือกที่ดีที่สุด (Alternative)")
     res = alt_cases[0]
     
-    # Metrics
     m4, m5, m6 = st.columns(3)
     m4.metric("จำนวนรวม", f"{res['TOTAL_BOXES']} ใบ")
     m5.metric("จำนวนชั้น", f"{res['MAX_LAYERS']} ชั้น")
-    m6.metric("ความสูงรวม (W/Pallet)", f"{res['TOTAL_HEIGHT']} mm")
+    m6.metric("ความสูงรวม", f"{res['TOTAL_HEIGHT']} mm")
     
-    # Tabs สำหรับเลือกมุมมอง
-    tab2_1, tab2_2 = st.tabs(["🔝 Top View (SVG)", "📐 Isometric 3D"])
+    tab2_1, tab2_2 = st.tabs(["🔝 Top View (SVG)", "📐 True 3D Isometric"])
     with tab2_1:
         st.write(generate_svg_pallet_layer(res, "#2563eb"), unsafe_allow_html=True)
     with tab2_2:
-        st.pyplot(generate_3d_isometric_view(res, "#2563eb"))
+        st.pyplot(generate_true_3d_view(res, "#2563eb"))
 
 st.write("---")
-
-# คำแนะนำ (Decision Support)
 if alt_cases[0]["TOTAL_BOXES"] > normal_cases[0]["TOTAL_BOXES"]:
-    st.success(f"🔥 **แนะนำทางเลือกอื่นๆ (Alternative):** สามารถเพิ่มจำนวนกล่องได้อีก **{alt_cases[0]['TOTAL_BOXES'] - normal_cases[0]['TOTAL_BOXES']} ใบ** ต่อพาเลท! (อย่าลืมเช็กทิศทางความแข็งแรงลอนกระดาษด้วย)")
+    st.success(f"🔥 **แนะนำทางเลือกอื่นๆ (Alternative):** สามารถเพิ่มจำนวนกล่องได้อีก **{alt_cases[0]['TOTAL_BOXES'] - normal_cases[0]['TOTAL_BOXES']} ใบ** ต่อพาเลท!")
 else:
-    st.info("💡 **แนะนำแบบจัดเรียงปกติ (Normal Case):** ได้ปริมาณกล่องสูงสุดและจัดเรียงได้ง่ายที่สุดสำหรับการรับน้ำหนักครับ")
+    st.info("💡 **แนะนำแบบจัดเรียงปกติ (Normal Case):** ได้ปริมาณกล่องสูงสุดและจัดเรียงได้ง่ายที่สุดครับ")
 
 st.write("---")
 st.subheader("📊 ตารางสรุป 6 ทิศทาง")
