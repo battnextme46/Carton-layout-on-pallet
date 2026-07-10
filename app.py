@@ -5,13 +5,13 @@ import plotly.graph_objects as go
 
 # --- การตั้งค่าหน้าเว็บ ---
 st.set_page_config(
-    page_title="Industrial Palletizing Optimizer V7.6", 
+    page_title="Industrial Palletizing Optimizer V7.7", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("📦 Carton Palletizing Layout Optimizer (Version 7.6)")
-st.write("ระบบจำลองการจัดวางสินค้า - แก้ไขฉากบนเข้ามุมชนสนิท 100% ไม่ Overlap พร้อมสายรัดน้ำเงินล้วน")
+st.title("📦 Carton Palletizing Layout Optimizer (Version 7.7)")
+st.write("ระบบจำลองการจัดวางสินค้า - แก้ไข Offset ฉากด้านบนให้สั้นลงเพื่อหลบฉากแนวตั้ง ไม่ซ้อนทับกัน")
 
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("1. ข้อมูลกล่องสินค้า (mm)")
@@ -156,7 +156,7 @@ def generate_2d_side_views(params, color_theme, view_type='front'):
     plt.tight_layout()
     return fig
 
-# --- PLOTLY 3D ENGINE (INDUSTRIAL V7.6) ---
+# --- PLOTLY 3D ENGINE ---
 def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color, opacity=1.0):
     fig.add_trace(go.Mesh3d(
         x=[x, x+dx, x+dx, x, x, x+dx, x+dx, x],
@@ -223,34 +223,34 @@ def generate_plotly_3d(params, color_theme, edge_theme):
     draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, oy + params["USED_L"], pallet_h, g_sz, g_th, cargo_pure_h, c_guard, c_line)
     draw_plotly_cube(fig, ox + params["USED_W"], oy + params["USED_L"] - g_sz, pallet_h, g_th, g_sz, cargo_pure_h, c_guard, c_line)
     
-    # 4. 🛡️ FIXED HORIZONTAL TOP EDGE GUARDS (แก้มิติชนฉากแบบวิศวกรรมแท้ 100% ไม่เหลื่อมตัดกัน)
-    # 4.1 ฉากบนแนวยาวขนานแกน Y (Master Edge: วิ่งยาวสุดขอบนอกรวมความหนาฉาก)
-    full_y_length = params["USED_L"] + (2 * g_th)
-    y_start_pos = oy - g_th
+    # 4. 🛡️ TOP HORIZONTAL EDGE GUARDS (คำนวณหดความยาวหลบฉากแนวตั้ง 100%)
+    # ความยาวฉากแนวนอนจะสั้นกว่าขนาดกองกล่อง เพื่อไม่ให้ส่วนปลายไปยื่นทับหรือชนกับฉากแนวตั้ง 4 มุม
     
-    # ฉากบนฝั่งซ้าย (แผ่นตั้งปีกนอก และ แผ่นนอนครอบด้านบน)
-    draw_plotly_cube(fig, ox - g_th, y_start_pos, cargo_top_z, g_th, full_y_length, g_sz, c_guard, c_line) 
-    draw_plotly_cube(fig, ox - g_th, y_start_pos, cargo_top_z + g_sz - g_th, g_sz, full_y_length, g_th, c_guard, c_line) 
+    # 4.1 ฉากบนแนวยาวขนานแกน Y (หดหัวท้ายข้างละ g_sz เพื่อให้อยู่ระหว่างกลางฉากแนวตั้งพอดี)
+    y_short_len = params["USED_L"] - (2 * g_sz)
+    y_start_pos = oy + g_sz
     
-    # ฉากบนฝั่งขวา (แผ่นตั้งปีกนอก และ แผ่นนอนครอบด้านบน)
-    draw_plotly_cube(fig, ox + params["USED_W"], y_start_pos, cargo_top_z, g_th, full_y_length, g_sz, c_guard, c_line) 
-    draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, y_start_pos, cargo_top_z + g_sz - g_th, g_sz, full_y_length, g_th, c_guard, c_line) 
+    # ฉากบนฝั่งซ้าย (แผ่นตั้งระนาบข้างกล่อง และแผ่นนอนพาดด้านบนขอบกล่อง)
+    draw_plotly_cube(fig, ox - g_th, y_start_pos, cargo_top_z, g_th, y_short_len, g_sz, c_guard, c_line) 
+    draw_plotly_cube(fig, ox - g_th, y_start_pos, cargo_top_z + g_sz - g_th, g_sz, y_short_len, g_th, c_guard, c_line) 
     
-    # 4.2 ฉากบนแนวขวางขนานแกน X (Slave Edge: คำนวณขอบเขตลบล้างจุด Overlap โดยสิ้นเชิง)
-    # - ตัวแผ่นตั้ง: หดความยาวเหลือแค่ params["USED_W"] (เท่าขอบกล่อง) เพื่อวิ่งมาชนระนาบด้านในของฉากแกน Y พอดี
-    # - ตัวแผ่นนอนบน: หดความยาวซ้าย-ขวาออกฝั่งละ g_sz และขยับจุดเริ่ม x เพื่อวางชนเข้าด้านข้างของปีกบนแกน Y พอดี
-    x_short_len = params["USED_W"] - (2 * g_sz) + (2 * g_th)
-    x_start_pos = ox + g_sz - g_th
+    # ฉากบนฝั่งขวา (แผ่นตั้งระนาบข้างกล่อง และแผ่นนอนพาดด้านบนขอบกล่อง)
+    draw_plotly_cube(fig, ox + params["USED_W"], y_start_pos, cargo_top_z, g_th, y_short_len, g_sz, c_guard, c_line) 
+    draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, y_start_pos, cargo_top_z + g_sz - g_th, g_sz, y_short_len, g_th, c_guard, c_line) 
     
-    # ฉากบนฝั่งหน้า (ขอบ oy - g_th)
-    draw_plotly_cube(fig, ox, oy - g_th, cargo_top_z, params["USED_W"], g_th, g_sz - g_th, c_guard, c_line) 
+    # 4.2 ฉากบนแนวขวางขนานแกน X (หดหัวท้ายข้างละ g_sz เพื่อให้อยู่ระหว่างกลางฉากแนวตั้งเช่นกัน)
+    x_short_len = params["USED_W"] - (2 * g_sz)
+    x_start_pos = ox + g_sz
+    
+    # ฉากบนฝั่งหน้า (แผ่นตั้งระนาบหน้ากล่อง และแผ่นนอนพาดด้านบนขอบกล่อง)
+    draw_plotly_cube(fig, x_start_pos, oy - g_th, cargo_top_z, x_short_len, g_th, g_sz, c_guard, c_line) 
     draw_plotly_cube(fig, x_start_pos, oy - g_th, cargo_top_z + g_sz - g_th, x_short_len, g_sz, g_th, c_guard, c_line) 
 
-    # ฉากบนฝั่งหลัง (ขอบ oy + USED_L)
-    draw_plotly_cube(fig, ox, oy + params["USED_L"], cargo_top_z, params["USED_W"], g_th, g_sz - g_th, c_guard, c_line) 
+    # ฉากบนฝั่งหลัง (แผ่นตั้งระนาบหลังกล่อง และแผ่นนอนพาดด้านบนขอบกล่อง)
+    draw_plotly_cube(fig, x_start_pos, oy + params["USED_L"], cargo_top_z, x_short_len, g_th, g_sz, c_guard, c_line) 
     draw_plotly_cube(fig, x_start_pos, oy + params["USED_L"] - g_sz + g_th, cargo_top_z + g_sz - g_th, x_short_len, g_sz, g_th, c_guard, c_line) 
 
-    # 5. 🧵 UNIFIED BLUE STRAPS (ระบบสายรัดพลาสติกสีน้ำเงินกรมท่าล้วน)
+    # 5. 🧵 UNIFIED BLUE STRAPS (ระบบสายรัดพลาสติกสีกรมท่าล้วน)
     strap_color = '#1e3a8a'
     s_w = 4.5
     
