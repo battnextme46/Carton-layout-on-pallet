@@ -5,13 +5,13 @@ import plotly.graph_objects as go
 
 # --- การตั้งค่าหน้าเว็บ ---
 st.set_page_config(
-    page_title="Industrial Palletizing Optimizer V7.2", 
+    page_title="Industrial Palletizing Optimizer V7.3", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("📦 Carton Palletizing Layout Optimizer (Version 7.2)")
-st.write("เครื่องมือจำลองการจัดวางระดับอุตสาหกรรม (เพิ่มระบบรัด Top Corner Guards และสายรัดแนวขวางครบสูตร)")
+st.title("📦 Carton Palletizing Layout Optimizer (Version 7.3)")
+st.write("เครื่องมือจำลองการจัดวางระดับอุตสาหกรรม (ปรับปรุงฉากกระดาษด้านบนเป็นโมเดล 3D และสายรัดสีน้ำเงินล้วน)")
 
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("1. ข้อมูลกล่องสินค้า (mm)")
@@ -156,7 +156,7 @@ def generate_2d_side_views(params, color_theme, view_type='front'):
     plt.tight_layout()
     return fig
 
-# --- PLOTLY 3D ENGINE (INDUSTRIAL V7.2) ---
+# --- PLOTLY 3D ENGINE (INDUSTRIAL V7.3) ---
 def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color, opacity=1.0):
     fig.add_trace(go.Mesh3d(
         x=[x, x+dx, x+dx, x, x, x+dx, x+dx, x],
@@ -204,68 +204,73 @@ def generate_plotly_3d(params, color_theme, edge_theme):
                 gx = ox + i * (bw + box_tolerance)
                 draw_plotly_cube(fig, gx, gy, gz, bw, bl, bh, color_theme, edge_theme)
                 
-    # 3. 🛡️ วาด VERTICAL PAPER CORNER GUARDS (ฉากกระดาษป้องกันมุมแนวตั้ง 4 มุมหลัก)
-    g_sz = 40  # ความกว้างปีกฉาก 40mm
-    g_th = 6   # ความหนาฉาก 6mm
-    g_h = cargo_pure_h
-    c_guard = '#94a3b8'  # สีฉากกระดาษมาตรฐาน
-    c_line = '#475569'   # สีเส้นขอบ
+    # --- การตั้งค่ามิติของฉากกระดาษ (Corner Guards) ---
+    g_sz = 40   # ความกว้างปีกฉาก 40mm
+    g_th = 6    # ความหนาเนื้อฉาก 6mm
+    c_guard = '#94a3b8'  # สีฉากกระดาษ
+    c_line = '#475569'   # สีเส้นขอบฉาก
     
-    # มุมที่ 1: หน้าซ้าย
-    draw_plotly_cube(fig, ox - g_th, oy - g_th, pallet_h, g_sz, g_th, g_h, c_guard, c_line)
-    draw_plotly_cube(fig, ox - g_th, oy, pallet_h, g_th, g_sz, g_h, c_guard, c_line)
-    # มุมที่ 2: หน้าขวา
-    draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, oy - g_th, pallet_h, g_sz, g_th, g_h, c_guard, c_line)
-    draw_plotly_cube(fig, ox + params["USED_W"], oy, pallet_h, g_th, g_sz, g_h, c_guard, c_line)
-    # มุมที่ 3: หลังซ้าย
-    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"], pallet_h, g_sz, g_th, g_h, c_guard, c_line)
-    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"] - g_sz, pallet_h, g_th, g_sz, g_h, c_guard, c_line)
-    # มุมที่ 4: หลังขวา
-    draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, oy + params["USED_L"], pallet_h, g_sz, g_th, g_h, c_guard, c_line)
-    draw_plotly_cube(fig, ox + params["USED_W"], oy + params["USED_L"] - g_sz, pallet_h, g_th, g_sz, g_h, c_guard, c_line)
+    # 3. 🛡️ VERTICAL PAPER CORNER GUARDS (ฉากแนวตั้ง 4 มุมหลัก)
+    draw_plotly_cube(fig, ox - g_th, oy - g_th, pallet_h, g_sz, g_th, cargo_pure_h, c_guard, c_line)
+    draw_plotly_cube(fig, ox - g_th, oy, pallet_h, g_th, g_sz, cargo_pure_h, c_guard, c_line)
     
-    # 4. 🔴 วาด HORIZONTAL TOP EDGE GUARDS (กรอบฉากกระดาษป้องกันรัดมุมด้านบนสุดครบ 4 ด้าน - เส้นประแดงเดิม)
-    # เพื่อความสมจริง: ขยายขนาดกรอบด้านบนให้ครอบแนวฉากกระดาษแนวตั้งด้วย
-    draw_plotly_cube(fig, ox - g_th, oy - g_th, cargo_top_z, params["USED_W"] + (2*g_th), g_th, g_th, '#cbd5e1', '#b91c1c') # ด้านหน้า
-    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"], cargo_top_z, params["USED_W"] + (2*g_th), g_th, g_th, '#cbd5e1', '#b91c1c') # ด้านหลัง
-    draw_plotly_cube(fig, ox - g_th, oy, cargo_top_z, g_th, params["USED_L"], g_th, '#cbd5e1', '#b91c1c') # ด้านซ้าย
-    draw_plotly_cube(fig, ox + params["USED_W"], oy, cargo_top_z, g_th, params["USED_L"], g_th, '#cbd5e1', '#b91c1c') # ด้านขวา
+    draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, oy - g_th, pallet_h, g_sz, g_th, cargo_pure_h, c_guard, c_line)
+    draw_plotly_cube(fig, ox + params["USED_W"], oy, pallet_h, g_th, g_sz, cargo_pure_h, c_guard, c_line)
+    
+    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"], pallet_h, g_sz, g_th, cargo_pure_h, c_guard, c_line)
+    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"] - g_sz, pallet_h, g_th, g_sz, cargo_pure_h, c_guard, c_line)
+    
+    draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, oy + params["USED_L"], pallet_h, g_sz, g_th, cargo_pure_h, c_guard, c_line)
+    draw_plotly_cube(fig, ox + params["USED_W"], oy + params["USED_L"] - g_sz, pallet_h, g_th, g_sz, cargo_pure_h, c_guard, c_line)
+    
+    # 4. 🔴 HORIZONTAL TOP EDGE GUARDS (ฉากกระดาษป้องกันรัดขอบด้านบนสุดครบทั้ง 4 ด้าน)
+    # เจนตระกูลแท่ง 3D (ปีกกว้าง 40mm หนา 6mm) ครอบขอบด้านบนตามความกว้างยาวของสินค้าจริง
+    # ด้านกว้าง (แนวแกน X) - วิ่งตามความยาว USED_W
+    draw_plotly_cube(fig, ox - g_th, oy - g_th, cargo_top_z, params["USED_W"] + (2*g_th), g_th, g_sz, c_guard, c_line) # ฉากหน้า (แผ่นตั้ง)
+    draw_plotly_cube(fig, ox - g_th, oy - g_th, cargo_top_z + g_sz - g_th, params["USED_W"] + (2*g_th), g_sz, g_th, c_guard, c_line) # ฉากหน้า (แผ่นนอนครอบบน)
+    
+    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"], cargo_top_z, params["USED_W"] + (2*g_th), g_th, g_sz, c_guard, c_line) # ฉากหลัง (แผ่นตั้ง)
+    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"] - g_sz + g_th, cargo_top_z + g_sz - g_th, params["USED_W"] + (2*g_th), g_sz, g_th, c_guard, c_line) # ฉากหลัง (แผ่นนอนครอบบน)
+    
+    # ด้านยาว (แนวแกน Y) - วิ่งตามความยาว USED_L
+    draw_plotly_cube(fig, ox - g_th, oy, cargo_top_z, g_th, params["USED_L"], g_sz, c_guard, c_line) # ฉากซ้าย (แผ่นตั้ง)
+    draw_plotly_cube(fig, ox - g_th, oy, cargo_top_z + g_sz - g_th, g_sz, params["USED_L"], g_th, c_guard, c_line) # ฉากซ้าย (แผ่นนอนครอบบน)
+    
+    draw_plotly_cube(fig, ox + params["USED_W"], oy, cargo_top_z, g_th, params["USED_L"], g_sz, c_guard, c_line) # ฉากขวา (แผ่นตั้ง)
+    draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, oy, cargo_top_z + g_sz - g_th, g_sz, params["USED_L"], g_th, c_guard, c_line) # ฉากขวา (แผ่นนอนครอบบน)
 
-    # 5. 🧵 VERTICAL STRAPS (สายรัดพลาสติกแนวตั้ง รัดรอบกองสินค้าแกนละ 2 เส้น)
-    strap_color_v = '#1e3a8a' # สีกรมท่าสำหรับแนวตั้ง
-    s_w = 4.0
+    # 5. 🧵 UNIFIED BLUE STRAPS (ระบบสายรัดพลาสติกสีกรมท่าแมตช์กันทุกเส้น)
+    strap_color = '#1e3a8a' # ปรับใช้สีกรมท่า (Blue) เหมือนกันทุกเส้นเพื่อความคลีนและเป็นระบบเดียวกัน
+    s_w = 4.5
     
-    # รัดแนวแกน X (2 เส้นที่ระยะ 25% และ 75%)
+    # 5.1 สายรัดแนวตั้ง (Vertical Straps) แกนละ 2 เส้น
     x_positions = [ox + (params["USED_W"] * 0.25), ox + (params["USED_W"] * 0.75)]
     for sx in x_positions:
         fig.add_trace(go.Scatter3d(
             x=[sx, sx, sx, sx, sx],
             y=[oy - g_th, oy - g_th, oy + params["USED_L"] + g_th, oy + params["USED_L"] + g_th, oy - g_th],
-            z=[pallet_h, cargo_top_z + g_th, cargo_top_z + g_th, pallet_h, pallet_h],
-            mode='lines', line=dict(color=strap_color_v, width=s_w), showlegend=False
+            z=[pallet_h, cargo_top_z + g_sz, cargo_top_z + g_sz, pallet_h, pallet_h],
+            mode='lines', line=dict(color=strap_color, width=s_w), showlegend=False
         ))
         
-    # รัดแนวแกน Y (2 เส้นที่ระยะ 25% และ 75%)
     y_positions = [oy + (params["USED_L"] * 0.25), oy + (params["USED_L"] * 0.75)]
     for sy in y_positions:
         fig.add_trace(go.Scatter3d(
             x=[ox - g_th, ox + params["USED_W"] + g_th, ox + params["USED_W"] + g_th, ox - g_th, ox - g_th],
             y=[sy, sy, sy, sy, sy],
-            z=[pallet_h, pallet_h, cargo_top_z + g_th, cargo_top_z + g_th, pallet_h],
-            mode='lines', line=dict(color=strap_color_v, width=s_w), showlegend=False
+            z=[pallet_h, pallet_h, cargo_top_z + g_sz, cargo_top_z + g_sz, pallet_h],
+            mode='lines', line=dict(color=strap_color, width=s_w), showlegend=False
         ))
 
-    # 6. 🟢 เพิ่ม HORIZONTAL STRAPS (สายรัดพลาสติกแนวขวางรอบกองกล่องเพิ่มอีก 2 เส้น - เส้นสีเขียวตามแบบ)
-    # แบ่งระยะความสูงตามสัดส่วนกองสินค้าจริง: เส้นล่างที่ความสูง 33% และเส้นบนที่ความสูง 66% ของ cargo_pure_h
-    strap_color_h = '#16a34a' # สีเขียวอุตสาหกรรมชัดเจนตามภาพบรีฟ
+    # 5.2 สายรัดแนวขวาง (Horizontal Straps) จำนวน 2 เส้น
+    # ปรับเป็นสีน้ำเงินกรมท่าระดับอุตสาหกรรม และคำนวณรัดที่ระดับ 33% และ 66% ของความสูงสินค้า
     h_strap_z_offsets = [pallet_h + (cargo_pure_h * 0.33), pallet_h + (cargo_pure_h * 0.66)]
-    
     for sz in h_strap_z_offsets:
         fig.add_trace(go.Scatter3d(
-            x=[ox - g_th, ox + params["USED_W"] + g_th, ox + params["USED_W"] + g_th, ox - g_th, ox - g_th],
-            y=[oy - g_th, oy - g_th, oy + params["USED_L"] + g_th, oy + params["USED_L"] + g_th, oy - g_th],
+            x=[ox - g_th - 1, ox + params["USED_W"] + g_th + 1, ox + params["USED_W"] + g_th + 1, ox - g_th - 1, ox - g_th - 1],
+            y=[oy - g_th - 1, oy - g_th - 1, oy + params["USED_L"] + g_th + 1, oy + params["USED_L"] + g_th + 1, oy - g_th - 1],
             z=[sz, sz, sz, sz, sz],
-            mode='lines', line=dict(color=strap_color_h, width=4.5), showlegend=False
+            mode='lines', line=dict(color=strap_color, width=s_w), showlegend=False
         ))
 
     # วาดระนาบเพดานสูงสุด Limit แดงโปร่งแสง
@@ -280,7 +285,7 @@ def generate_plotly_3d(params, color_theme, edge_theme):
         scene=dict(
             xaxis=dict(title='Width (mm)', range=[-100, pallet_w + 100]),
             yaxis=dict(title='Length (mm)', range=[-100, pallet_l + 100]),
-            zaxis=dict(title='Height (mm)', range=[0, max_air_height + 100]),
+            zaxis=dict(title='Height (mm)', range=[0, max_air_height + 150]),
             aspectmode='manual',
             aspectratio=dict(
                 x=pallet_w / base_max,
