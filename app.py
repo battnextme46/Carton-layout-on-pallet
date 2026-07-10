@@ -5,13 +5,13 @@ import plotly.graph_objects as go
 
 # --- การตั้งค่าหน้าเว็บ ---
 st.set_page_config(
-    page_title="Industrial Palletizing Optimizer V7.3", 
+    page_title="Industrial Palletizing Optimizer V7.4", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("📦 Carton Palletizing Layout Optimizer (Version 7.3)")
-st.write("เครื่องมือจำลองการจัดวางระดับอุตสาหกรรม (ปรับปรุงฉากกระดาษด้านบนเป็นโมเดล 3D และสายรัดสีน้ำเงินล้วน)")
+st.title("📦 Carton Palletizing Layout Optimizer (Version 7.4)")
+st.write("เครื่องมือจำลองการจัดวาง (ปรับปรุงฉากกระดาษด้านบนเข้ามุมแบบ Butt Joint ไม่ Overlap และสายรัดสีน้ำเงินล้วน)")
 
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("1. ข้อมูลกล่องสินค้า (mm)")
@@ -156,7 +156,7 @@ def generate_2d_side_views(params, color_theme, view_type='front'):
     plt.tight_layout()
     return fig
 
-# --- PLOTLY 3D ENGINE (INDUSTRIAL V7.3) ---
+# --- PLOTLY 3D ENGINE (INDUSTRIAL V7.4) ---
 def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color, opacity=1.0):
     fig.add_trace(go.Mesh3d(
         x=[x, x+dx, x+dx, x, x, x+dx, x+dx, x],
@@ -210,7 +210,7 @@ def generate_plotly_3d(params, color_theme, edge_theme):
     c_guard = '#94a3b8'  # สีฉากกระดาษ
     c_line = '#475569'   # สีเส้นขอบฉาก
     
-    # 3. 🛡️ VERTICAL PAPER CORNER GUARDS (ฉากแนวตั้ง 4 มุมหลัก)
+    # 3. VERTICAL PAPER CORNER GUARDS (ฉากแนวตั้ง 4 มุมหลัก)
     draw_plotly_cube(fig, ox - g_th, oy - g_th, pallet_h, g_sz, g_th, cargo_pure_h, c_guard, c_line)
     draw_plotly_cube(fig, ox - g_th, oy, pallet_h, g_th, g_sz, cargo_pure_h, c_guard, c_line)
     
@@ -223,24 +223,27 @@ def generate_plotly_3d(params, color_theme, edge_theme):
     draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, oy + params["USED_L"], pallet_h, g_sz, g_th, cargo_pure_h, c_guard, c_line)
     draw_plotly_cube(fig, ox + params["USED_W"], oy + params["USED_L"] - g_sz, pallet_h, g_th, g_sz, cargo_pure_h, c_guard, c_line)
     
-    # 4. 🔴 HORIZONTAL TOP EDGE GUARDS (ฉากกระดาษป้องกันรัดขอบด้านบนสุดครบทั้ง 4 ด้าน)
-    # เจนตระกูลแท่ง 3D (ปีกกว้าง 40mm หนา 6mm) ครอบขอบด้านบนตามความกว้างยาวของสินค้าจริง
-    # ด้านกว้าง (แนวแกน X) - วิ่งตามความยาว USED_W
-    draw_plotly_cube(fig, ox - g_th, oy - g_th, cargo_top_z, params["USED_W"] + (2*g_th), g_th, g_sz, c_guard, c_line) # ฉากหน้า (แผ่นตั้ง)
-    draw_plotly_cube(fig, ox - g_th, oy - g_th, cargo_top_z + g_sz - g_th, params["USED_W"] + (2*g_th), g_sz, g_th, c_guard, c_line) # ฉากหน้า (แผ่นนอนครอบบน)
+    # 4. 🛡️ HORIZONTAL TOP EDGE GUARDS (เข้ามุมแบบ Butt Joint ไม่หั่นซ้อนทับกัน)
+    # ให้ฉากแนวยาว (แกน Y) วิ่งสุดความยาวกองสินค้าจริง
+    # ให้ฉากแนวขวาง (แกน X) ทำการ Offset ลบความหนา g_th ทั้งหัวและท้ายเพื่อหลบแนวทับ
     
-    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"], cargo_top_z, params["USED_W"] + (2*g_th), g_th, g_sz, c_guard, c_line) # ฉากหลัง (แผ่นตั้ง)
-    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"] - g_sz + g_th, cargo_top_z + g_sz - g_th, params["USED_W"] + (2*g_th), g_sz, g_th, c_guard, c_line) # ฉากหลัง (แผ่นนอนครอบบน)
-    
-    # ด้านยาว (แนวแกน Y) - วิ่งตามความยาว USED_L
+    # 4.1 ฉากบนขนานแกน Y (ยาวเต็มเส้น - ความยาวเท่ากับ USED_L)
     draw_plotly_cube(fig, ox - g_th, oy, cargo_top_z, g_th, params["USED_L"], g_sz, c_guard, c_line) # ฉากซ้าย (แผ่นตั้ง)
-    draw_plotly_cube(fig, ox - g_th, oy, cargo_top_z + g_sz - g_th, g_sz, params["USED_L"], g_th, c_guard, c_line) # ฉากซ้าย (แผ่นนอนครอบบน)
+    draw_plotly_cube(fig, ox - g_th, oy, cargo_top_z + g_sz - g_th, g_sz, params["USED_L"], g_th, c_guard, c_line) # ฉากซ้าย (แผ่นนอน)
     
     draw_plotly_cube(fig, ox + params["USED_W"], oy, cargo_top_z, g_th, params["USED_L"], g_sz, c_guard, c_line) # ฉากขวา (แผ่นตั้ง)
-    draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, oy, cargo_top_z + g_sz - g_th, g_sz, params["USED_L"], g_th, c_guard, c_line) # ฉากขวา (แผ่นนอนครอบบน)
+    draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, oy, cargo_top_z + g_sz - g_th, g_sz, params["USED_L"], g_th, c_guard, c_line) # ฉากขวา (แผ่นนอน)
+    
+    # 4.2 ฉากบนขนานแกน X (หลบมุม Butt Joint - ลดความยาวลงเหลือ USED_W)
+    # เริ่มต้นวาดจากพิกัด ox เพื่อชนกับขอบในของฉากแกน Y พอดีเป๊ะ ไม่เกยทับกันข้างนอก
+    draw_plotly_cube(fig, ox, oy - g_th, cargo_top_z, params["USED_W"], g_th, g_sz, c_guard, c_line) # ฉากหน้า (แผ่นตั้ง)
+    draw_plotly_cube(fig, ox, oy - g_th, cargo_top_z + g_sz - g_th, params["USED_W"], g_sz, g_th, c_guard, c_line) # ฉากหน้า (แผ่นนอน)
+    
+    draw_plotly_cube(fig, ox, oy + params["USED_L"], cargo_top_z, params["USED_W"], g_th, g_sz, c_guard, c_line) # ฉากหลัง (แผ่นตั้ง)
+    draw_plotly_cube(fig, ox, oy + params["USED_L"] - g_sz + g_th, cargo_top_z + g_sz - g_th, params["USED_W"], g_sz, g_th, c_guard, c_line) # ฉากหลัง (แผ่นนอน)
 
-    # 5. 🧵 UNIFIED BLUE STRAPS (ระบบสายรัดพลาสติกสีกรมท่าแมตช์กันทุกเส้น)
-    strap_color = '#1e3a8a' # ปรับใช้สีกรมท่า (Blue) เหมือนกันทุกเส้นเพื่อความคลีนและเป็นระบบเดียวกัน
+    # 5. 🧵 UNIFIED BLUE STRAPS (ระบบสายรัดพลาสติกสีน้ำเงินกรมท่าระดับอุตสาหกรรม)
+    strap_color = '#1e3a8a'
     s_w = 4.5
     
     # 5.1 สายรัดแนวตั้ง (Vertical Straps) แกนละ 2 เส้น
@@ -262,8 +265,7 @@ def generate_plotly_3d(params, color_theme, edge_theme):
             mode='lines', line=dict(color=strap_color, width=s_w), showlegend=False
         ))
 
-    # 5.2 สายรัดแนวขวาง (Horizontal Straps) จำนวน 2 เส้น
-    # ปรับเป็นสีน้ำเงินกรมท่าระดับอุตสาหกรรม และคำนวณรัดที่ระดับ 33% และ 66% ของความสูงสินค้า
+    # 5.2 สายรัดแนวขวาง (Horizontal Straps) จำนวน 2 เส้น ปรับสีกรมท่าล้วนเข้าชุดกัน
     h_strap_z_offsets = [pallet_h + (cargo_pure_h * 0.33), pallet_h + (cargo_pure_h * 0.66)]
     for sz in h_strap_z_offsets:
         fig.add_trace(go.Scatter3d(
