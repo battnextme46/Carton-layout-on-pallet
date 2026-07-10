@@ -5,13 +5,13 @@ import plotly.graph_objects as go
 
 # --- การตั้งค่าหน้าเว็บ ---
 st.set_page_config(
-    page_title="Industrial Palletizing Optimizer V7.1", 
+    page_title="Industrial Palletizing Optimizer V7.2", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("📦 Carton Palletizing Layout Optimizer (Version 7.1)")
-st.write("เครื่องมือจำลองการจัดวางระดับอุตสาหกรรม (แก้ไข Bug พิกัดฉากกระดาษและล็อกสเกลเรขาคณิตเรียบร้อย)")
+st.title("📦 Carton Palletizing Layout Optimizer (Version 7.2)")
+st.write("เครื่องมือจำลองการจัดวางระดับอุตสาหกรรม (เพิ่มระบบรัด Top Corner Guards และสายรัดแนวขวางครบสูตร)")
 
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("1. ข้อมูลกล่องสินค้า (mm)")
@@ -156,7 +156,7 @@ def generate_2d_side_views(params, color_theme, view_type='front'):
     plt.tight_layout()
     return fig
 
-# --- PLOTLY 3D ENGINE (INDUSTRIAL MODE) ---
+# --- PLOTLY 3D ENGINE (INDUSTRIAL V7.2) ---
 def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color, opacity=1.0):
     fig.add_trace(go.Mesh3d(
         x=[x, x+dx, x+dx, x, x, x+dx, x+dx, x],
@@ -189,7 +189,8 @@ def generate_plotly_3d(params, color_theme, edge_theme):
     bw, bl, bh = params["BW_USED"], params["BL_USED"], params["BH_USED"]
     
     ox, oy = (pallet_w - params["USED_W"]) / 2, (pallet_l - params["USED_L"]) / 2
-    cargo_top_z = pallet_h + (layers * bh)
+    cargo_pure_h = layers * bh
+    cargo_top_z = pallet_h + cargo_pure_h
     
     # 1. วาดพาเลทฐานล่าง
     draw_plotly_cube(fig, 0, 0, 0, pallet_w, pallet_l, pallet_h, '#cbd5e1', '#475569')
@@ -203,12 +204,12 @@ def generate_plotly_3d(params, color_theme, edge_theme):
                 gx = ox + i * (bw + box_tolerance)
                 draw_plotly_cube(fig, gx, gy, gz, bw, bl, bh, color_theme, edge_theme)
                 
-    # 3. 🛡️ วาด PAPER CORNER GUARDS (ฉากกระดาษป้องกันมุม 4 มุมหลัก)
-    g_sz = 40  # ความกว้างปีกฉากกระดาษมุม 40mm
-    g_th = 6   # ความหนาฉากกระดาษ 6mm
-    g_h = cargo_top_z - pallet_h  # ความสูงฉากเท่ากับกองสินค้า
-    c_guard = '#94a3b8'  # สีฉากกระดาษเทาอ่อนมาตรฐาน
-    c_line = '#475569'   # สีเส้นขอบฉาก
+    # 3. 🛡️ วาด VERTICAL PAPER CORNER GUARDS (ฉากกระดาษป้องกันมุมแนวตั้ง 4 มุมหลัก)
+    g_sz = 40  # ความกว้างปีกฉาก 40mm
+    g_th = 6   # ความหนาฉาก 6mm
+    g_h = cargo_pure_h
+    c_guard = '#94a3b8'  # สีฉากกระดาษมาตรฐาน
+    c_line = '#475569'   # สีเส้นขอบ
     
     # มุมที่ 1: หน้าซ้าย
     draw_plotly_cube(fig, ox - g_th, oy - g_th, pallet_h, g_sz, g_th, g_h, c_guard, c_line)
@@ -223,34 +224,48 @@ def generate_plotly_3d(params, color_theme, edge_theme):
     draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, oy + params["USED_L"], pallet_h, g_sz, g_th, g_h, c_guard, c_line)
     draw_plotly_cube(fig, ox + params["USED_W"], oy + params["USED_L"] - g_sz, pallet_h, g_th, g_sz, g_h, c_guard, c_line)
     
-    # 4. 🔲 วาด TOP EDGE GUARDS (กรอบฉากกระดาษป้องกันรัดมุมด้านบนสุด 4 ด้าน)
-    draw_plotly_cube(fig, ox, oy - g_th, cargo_top_z, params["USED_W"], g_th, g_th, '#e2e8f0', c_line)
-    draw_plotly_cube(fig, ox, oy + params["USED_L"], cargo_top_z, params["USED_W"], g_th, g_th, '#e2e8f0', c_line)
-    draw_plotly_cube(fig, ox - g_th, oy, cargo_top_z, g_th, params["USED_L"], g_th, '#e2e8f0', c_line)
-    draw_plotly_cube(fig, ox + params["USED_W"], oy, cargo_top_z, g_th, params["USED_L"], g_th, '#e2e8f0', c_line)
+    # 4. 🔴 วาด HORIZONTAL TOP EDGE GUARDS (กรอบฉากกระดาษป้องกันรัดมุมด้านบนสุดครบ 4 ด้าน - เส้นประแดงเดิม)
+    # เพื่อความสมจริง: ขยายขนาดกรอบด้านบนให้ครอบแนวฉากกระดาษแนวตั้งด้วย
+    draw_plotly_cube(fig, ox - g_th, oy - g_th, cargo_top_z, params["USED_W"] + (2*g_th), g_th, g_th, '#cbd5e1', '#b91c1c') # ด้านหน้า
+    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"], cargo_top_z, params["USED_W"] + (2*g_th), g_th, g_th, '#cbd5e1', '#b91c1c') # ด้านหลัง
+    draw_plotly_cube(fig, ox - g_th, oy, cargo_top_z, g_th, params["USED_L"], g_th, '#cbd5e1', '#b91c1c') # ด้านซ้าย
+    draw_plotly_cube(fig, ox + params["USED_W"], oy, cargo_top_z, g_th, params["USED_L"], g_th, '#cbd5e1', '#b91c1c') # ด้านขวา
 
-    # 5. 🧵 วาด STRAPS (สายรัดพลาสติกสีกรมท่าเข้ม รัดรอบกองสินค้าแนวตั้งแกนละ 2 เส้น)
-    strap_color = '#1e3a8a'
+    # 5. 🧵 VERTICAL STRAPS (สายรัดพลาสติกแนวตั้ง รัดรอบกองสินค้าแกนละ 2 เส้น)
+    strap_color_v = '#1e3a8a' # สีกรมท่าสำหรับแนวตั้ง
     s_w = 4.0
     
-    # รัดแนวแกน X (ตัดผ่านหน้ากว้างของกองกล่อง 2 เส้นที่ระยะ 25% และ 75%)
+    # รัดแนวแกน X (2 เส้นที่ระยะ 25% และ 75%)
     x_positions = [ox + (params["USED_W"] * 0.25), ox + (params["USED_W"] * 0.75)]
     for sx in x_positions:
         fig.add_trace(go.Scatter3d(
             x=[sx, sx, sx, sx, sx],
             y=[oy - g_th, oy - g_th, oy + params["USED_L"] + g_th, oy + params["USED_L"] + g_th, oy - g_th],
             z=[pallet_h, cargo_top_z + g_th, cargo_top_z + g_th, pallet_h, pallet_h],
-            mode='lines', line=dict(color=strap_color, width=s_w), showlegend=False
+            mode='lines', line=dict(color=strap_color_v, width=s_w), showlegend=False
         ))
         
-    # รัดแนวแกน Y (ตัดผ่านหน้ายาวของกองกล่อง 2 เส้นที่ระยะ 25% และ 75%)
+    # รัดแนวแกน Y (2 เส้นที่ระยะ 25% และ 75%)
     y_positions = [oy + (params["USED_L"] * 0.25), oy + (params["USED_L"] * 0.75)]
     for sy in y_positions:
         fig.add_trace(go.Scatter3d(
             x=[ox - g_th, ox + params["USED_W"] + g_th, ox + params["USED_W"] + g_th, ox - g_th, ox - g_th],
             y=[sy, sy, sy, sy, sy],
             z=[pallet_h, pallet_h, cargo_top_z + g_th, cargo_top_z + g_th, pallet_h],
-            mode='lines', line=dict(color=strap_color, width=s_w), showlegend=False
+            mode='lines', line=dict(color=strap_color_v, width=s_w), showlegend=False
+        ))
+
+    # 6. 🟢 เพิ่ม HORIZONTAL STRAPS (สายรัดพลาสติกแนวขวางรอบกองกล่องเพิ่มอีก 2 เส้น - เส้นสีเขียวตามแบบ)
+    # แบ่งระยะความสูงตามสัดส่วนกองสินค้าจริง: เส้นล่างที่ความสูง 33% และเส้นบนที่ความสูง 66% ของ cargo_pure_h
+    strap_color_h = '#16a34a' # สีเขียวอุตสาหกรรมชัดเจนตามภาพบรีฟ
+    h_strap_z_offsets = [pallet_h + (cargo_pure_h * 0.33), pallet_h + (cargo_pure_h * 0.66)]
+    
+    for sz in h_strap_z_offsets:
+        fig.add_trace(go.Scatter3d(
+            x=[ox - g_th, ox + params["USED_W"] + g_th, ox + params["USED_W"] + g_th, ox - g_th, ox - g_th],
+            y=[oy - g_th, oy - g_th, oy + params["USED_L"] + g_th, oy + params["USED_L"] + g_th, oy - g_th],
+            z=[sz, sz, sz, sz, sz],
+            mode='lines', line=dict(color=strap_color_h, width=4.5), showlegend=False
         ))
 
     # วาดระนาบเพดานสูงสุด Limit แดงโปร่งแสง
