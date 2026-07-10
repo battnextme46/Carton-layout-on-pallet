@@ -5,25 +5,25 @@ import plotly.graph_objects as go
 
 # --- การตั้งค่าหน้าเว็บ ---
 st.set_page_config(
-    page_title="Carton Palletizing Optimizer V6.1", 
+    page_title="Industrial Palletizing Optimizer V7.0", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("📦 Carton Palletizing Layout Optimizer (Version 6.1)")
-st.write("เครื่องมือวิเคราะห์การจัดวางกล่องเวอร์ชันสมบูรณ์ (ตัวเลขอ่านทิศทางชิดขอบ + ปิดแสงเงาหลอกตา + ล็อกสเกล 3D จริงตามหลักเรขาคณิต)")
+st.title("📦 Carton Palletizing Layout Optimizer (Version 7.0)")
+st.write("เครื่องมือจำลองการจัดวางระดับอุตสาหกรรม (เพิ่มฉากกระดาษมุม Corner Guard + สายรัดพลาสติก Strap + ล็อกสเกลจริง)")
 
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("1. ข้อมูลกล่องสินค้า (mm)")
-box_w = st.sidebar.number_input("ความกว้างกล่อง (Width - W)", value=330.0, step=10.0)
-box_l = st.sidebar.number_input("ความยาวกล่อง (Length - L)", value=303.0, step=10.0)
-box_h = st.sidebar.number_input("ความสูงกล่อง (Height - H)", value=397.0, step=10.0)
+box_w = st.sidebar.number_input("ความกว้างกล่อง (Width - W)", value=370.0, step=10.0)
+box_l = st.sidebar.number_input("ความยาวกล่อง (Length - L)", value=250.0, step=10.0)
+box_h = st.sidebar.number_input("ความสูงกล่อง (Height - H)", value=125.0, step=10.0)
 
 st.sidebar.header("2. ข้อมูลพาเลทและข้อจำกัด (mm)")
 pallet_w = st.sidebar.number_input("ความกว้างพาเลท (Pallet W)", value=1200.0, step=50.0)
-pallet_l = st.sidebar.number_input("ความยาวพาเลท (Pallet L)", value=1000.0, step=50.0)
-pallet_h = st.sidebar.number_input("ความหนาของพาเลท (Pallet H)", value=140.0, step=10.0)
-max_air_height = st.sidebar.number_input("จำกัดความสูงรวมพาเลท", value=1600.0, step=50.0)
+pallet_l = st.sidebar.number_input("ความยาวพาเลท (Pallet L)", value=800.0, step=50.0)
+pallet_h = st.sidebar.number_input("ความหนาของพาเลท (Pallet H)", value=150.0, step=10.0)
+max_air_height = st.sidebar.number_input("จำกัดความสูงรวมพาเลท", value=1500.0, step=50.0)
 
 st.sidebar.header("3. ระยะเผื่อ (Tolerances - mm)")
 box_tolerance = st.sidebar.slider("ระยะเผื่อระหว่างกล่อง", 0.0, 10.0, 2.0, step=0.5)
@@ -88,7 +88,7 @@ normal_cases.sort(key=lambda x: (x['TOTAL_BOXES'], -x['TOTAL_HEIGHT']), reverse=
 alt_cases.sort(key=lambda x: (x['TOTAL_BOXES'], -x['TOTAL_HEIGHT']), reverse=True)
 all_ordered_cases = normal_cases + alt_cases
 
-# --- SVG VISUALIZATION ENGINE (2D Top View - Precision Label Positioning) ---
+# --- SVG VISUALIZATION ENGINE (2D Top View) ---
 def generate_svg_pallet_layer(params, color_theme):
     if params["TOTAL_BOXES"] == 0:
         return f'<svg width="100%" height="auto" viewBox="0 0 1000 800" xmlns="http://www.w3.org/2000/svg"><rect width="1000" height="800" fill="#f8fafc" stroke="#ef4444" stroke-width="4"/><text x="500" y="400" font-size="40" fill="#ef4444" text-anchor="middle">ไม่สามารถจัดวางได้</text></svg>'
@@ -108,17 +108,13 @@ def generate_svg_pallet_layer(params, color_theme):
         for j in range(sl):
             x, y = ox + i * (bw + box_tolerance), oy + j * (bl + box_tolerance)
             svg += f'<rect x="{x}" y="{y}" width="{bw}" height="{bl}" fill="#ffedd5" stroke="#ea580c" stroke-width="2" rx="4" />'
-            
-            # ตัวเลขด้านกว้างขยับขึ้นชิดขอบกล่องด้านบน
             svg += f'<text x="{x + bw/2}" y="{y + 25}" font-size="16" font-weight="bold" fill="#c2410c" text-anchor="middle">{int(bw)}</text>'
-            
-            # ตัวเลขด้านยาวขยับไปทางขวาชิดขอบกล่อง และหมุนตั้งฉากขนานไปกับขอบตามหลักวิศวกรรม
             svg += f'<text x="{x + bw - 12}" y="{y + bl/2}" font-size="16" font-weight="bold" fill="#475569" text-anchor="middle" transform="rotate(-90, {x + bw - 12}, {y + bl/2})">{int(bl)}</text>'
             
     svg += '</svg>'
     return svg
 
-# --- 2D SIDE VIEW ENGINE (MATPLOTLIB) ---
+# --- 2D SIDE VIEW ENGINE ---
 def generate_2d_side_views(params, color_theme, view_type='front'):
     fig, ax = plt.subplots(figsize=(8, 5))
     layers = params["MAX_LAYERS"]
@@ -160,8 +156,8 @@ def generate_2d_side_views(params, color_theme, view_type='front'):
     plt.tight_layout()
     return fig
 
-# --- PLOTLY 3D ENGINE (TRUE GEOMETRIC SCALE & NO SHADOWS) ---
-def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color):
+# --- PLOTLY 3D ENGINE (INDUSTRIAL MODE: CORNER GUARDS & STRAPS) ---
+def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color, opacity=1.0):
     fig.add_trace(go.Mesh3d(
         x=[x, x+dx, x+dx, x, x, x+dx, x+dx, x],
         y=[y, y, y+dy, y+dy, y, y, y+dy, y+dy],
@@ -170,27 +166,21 @@ def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color):
         j=[3, 4, 1, 2, 5, 6, 2, 7, 5, 4, 2, 6],
         k=[0, 7, 2, 3, 6, 7, 1, 6, 1, 5, 6, 5],
         color=color, 
-        opacity=1.0, 
+        opacity=opacity, 
         flatshading=True, 
         showscale=False,
-        # ลบแสงเงาหลอกตาออกไปทั้งหมดเพื่อให้สีกล่องเรียบเนียนเสมอกันทุกด้าน
-        lighting=dict(
-            ambient=1.0,      
-            diffuse=0.0,      
-            specular=0.0,     
-            roughness=1.0,    
-            fresnel=0.0
-        ),
+        lighting=dict(ambient=1.0, diffuse=0.0, specular=0.0, roughness=1.0, fresnel=0.0),
         lightposition=dict(x=0, y=0, z=0)
     ))
     
-    # วาดเส้น Wireframe ขอบกล่องเพิ่มความชัดเจนเชิงวิศวกรรม
-    for edge in [
-        ([x, x+dx], [y, y], [z, z]), ([x, x], [y, y+dy], [z, z]), ([x+dx, x+dx], [y, y+dy], [z, z]), ([x, x+dx], [y+dy, y+dy], [z, z]),
-        ([x, x+dx], [y, y], [z+dz, z+dz]), ([x, x], [y, y+dy], [z+dz, z+dz]), ([x+dx, x+dx], [y, y+dy], [z+dz, z+dz]), ([x, x+dx], [y+dy, y+dy], [z+dz, z+dz]),
-        ([x, x], [y, y], [z, z+dz]), ([x+dx, x+dx], [y, y], [z, z+dz]), ([x, x], [y+dy, y+dy], [z, z+dz]), ([x+dx, x+dx], [y+dy, y+dy], [z, z+dz])
-    ]:
-        fig.add_trace(go.Scatter3d(x=edge[0], y=edge[1], z=edge[2], mode='lines', line=dict(color=line_color, width=2.5), showlegend=False))
+    # วาด Wireframe
+    if opacity == 1.0:
+        for edge in [
+            ([x, x+dx], [y, y], [z, z]), ([x, x], [y, y+dy], [z, z]), ([x+dx, x+dx], [y, y+dy], [z, z]), ([x, x+dx], [y+dy, y+dy], [z, z]),
+            ([x, x+dx], [y, y], [z+dz, z+dz]), ([x, x], [y, y+dy], [z+dz, z+dz]), ([x+dx, x+dx], [y, y+dy], [z+dz, z+dz]), ([x, x+dx], [y+dy, y+dy], [z+dz, z+dz]),
+            ([x, x], [y, y], [z, z+dz]), ([x+dx, x+dx], [y, y], [z, z+dz]), ([x, x], [y+dy, y+dy], [z, z+dz]), ([x+dx, x+dx], [y+dy, y+dy], [z, z+dz])
+        ]:
+            fig.add_trace(go.Scatter3d(x=edge[0], y=edge[1], z=edge[2], mode='lines', line=dict(color=line_color, width=2), showlegend=False))
 
 def generate_plotly_3d(params, color_theme, edge_theme):
     if params["TOTAL_BOXES"] == 0:
@@ -198,12 +188,14 @@ def generate_plotly_3d(params, color_theme, edge_theme):
     fig = go.Figure()
     sw, sl, layers = params["SLOTS_W"], params["SLOTS_L"], params["MAX_LAYERS"]
     bw, bl, bh = params["BW_USED"], params["BL_USED"], params["BH_USED"]
-    ox, oy = (pallet_w - params["USED_W"]) / 2, (pallet_l - params["USED_L"]) / 2
     
-    # วาดพาเลทฐานล่าง
+    ox, oy = (pallet_w - params["USED_W"]) / 2, (pallet_l - params["USED_L"]) / 2
+    cargo_top_z = pallet_h + (layers * bh)
+    
+    # 1. วาดพาเลทฐานล่าง
     draw_plotly_cube(fig, 0, 0, 0, pallet_w, pallet_l, pallet_h, '#cbd5e1', '#475569')
     
-    # วาดกองกล่องสินค้า
+    # 2. วาดกองกล่องสินค้า
     for k in range(layers):
         gz = pallet_h + (k * bh)
         for j in range(sl):
@@ -212,22 +204,67 @@ def generate_plotly_3d(params, color_theme, edge_theme):
                 gx = ox + i * (bw + box_tolerance)
                 draw_plotly_cube(fig, gx, gy, gz, bw, bl, bh, color_theme, edge_theme)
                 
+    # 3. 🛡️ วาด PAPER CORNER GUARDS (ฉากกระดาษป้องกันมุมอุตสาหกรรม 4 มุมหลัก)
+    guard_size = 40  # ปีกกว้าง 40 mm
+    g_th = 5        # ความหนาฉากกระดาษ
+    g_h = cargo_top_z - pallet_h  # ความสูงของการป้องกันเท่ากับกองสินค้า
+    
+    # มุมที่ 1: หน้าซ้าย
+    draw_plotly_cube(fig, ox - g_th, oy - g_th, pallet_h, guard_size, g_th, g_h, '#94a3b8', '#64748b')
+    draw_plotly_cube(fig, ox - g_th, oy, g_th, guard_size, g_h, '#94a3b8', '#64748b')
+    # มุมที่ 2: หน้าขวา
+    draw_plotly_cube(fig, ox + params["USED_W"] - guard_size + g_th, oy - g_th, pallet_h, guard_size, g_th, g_h, '#94a3b8', '#64748b')
+    draw_plotly_cube(fig, ox + params["USED_W"], oy, pallet_h, g_th, guard_size, g_h, '#94a3b8', '#64748b')
+    # มุมที่ 3: หลังซ้าย
+    draw_plotly_cube(fig, ox - g_th, ox = ox, oy + params["USED_L"], pallet_h, guard_size, g_th, g_h, '#94a3b8', '#64748b') # ล็อกระนาบหลัง
+    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"] - guard_size, pallet_h, g_th, guard_size, g_h, '#94a3b8', '#64748b')
+    # มุมที่ 4: หลังขวา
+    draw_plotly_cube(fig, ox + params["USED_W"] - guard_size + g_th, oy + params["USED_L"], pallet_h, guard_size, g_th, g_h, '#94a3b8', '#64748b')
+    draw_plotly_cube(fig, ox + params["USED_W"], oy + params["USED_L"] - guard_size, pallet_h, g_th, guard_size, g_h, '#94a3b8', '#64748b')
+    
+    # 4. 🔲 วาด TOP EDGE GUARDS (กรอบฉากกระดาษป้องกันรัดมุมด้านบนสุด 4 ด้าน)
+    draw_plotly_cube(fig, ox, oy - g_th, cargo_top_z, params["USED_W"], g_th, g_th, '#e2e8f0', '#64748b')
+    draw_plotly_cube(fig, ox, oy + params["USED_L"], cargo_top_z, params["USED_W"], g_th, g_th, '#e2e8f0', '#64748b')
+    draw_plotly_cube(fig, ox - g_th, oy, cargo_top_z, g_th, params["USED_L"], g_th, '#e2e8f0', '#64748b')
+    draw_plotly_cube(fig, ox + params["USED_W"], oy, cargo_top_z, g_th, params["USED_L"], g_th, '#e2e8f0', '#64748b')
+
+    # 5. 🧵 วาด STRAPS (สายรัดพลาสติกเหล็ก/PP เส้นคู่แนวตั้งรอบกองสินค้าตามหลัก Packaging)
+    strap_color = '#1e3a8a' # สายรัดสีกรมท่าเข้มอุตสาหกรรม
+    s_w = 4.0               # ความหนาเส้นกราฟิก
+    
+    # รัดแนวแกน X (ตัดผ่านความกว้างของกองกล่อง 2 เส้น)
+    x_positions = [ox + (params["USED_W"] * 0.25), ox + (params["USED_W"] * 0.75)]
+    for sx in x_positions:
+        fig.add_trace(go.Scatter3d(
+            x=[sx, sx, sx, sx, sx],
+            y=[oy - g_th, oy - g_th, oy + params["USED_L"] + g_th, oy + params["USED_L"] + g_th, oy - g_th],
+            z=[pallet_h, cargo_top_z + g_th, cargo_top_z + g_th, pallet_h, pallet_h],
+            mode='lines', line=dict(color=strap_color, width=s_w), showlegend=False
+        ))
+        
+    # รัดแนวแกน Y (ตัดผ่านความยาวของกองกล่อง 2 เส้น)
+    y_positions = [oy + (params["USED_L"] * 0.25), oy + (params["USED_L"] * 0.75)]
+    for sy in y_positions:
+        fig.add_trace(go.Scatter3d(
+            x=[ox - g_th, ox + params["USED_W"] + g_th, ox + params["USED_W"] + g_th, ox - g_th, ox - g_th],
+            y=[sy, sy, sy, sy, sy],
+            z=[pallet_h, pallet_h, cargo_top_z + g_th, cargo_top_z + g_th, pallet_h],
+            mode='lines', line=dict(color=strap_color, width=s_w), showlegend=False
+        ))
+
     # วาดระนาบเพดานสูงสุด Limit แดงโปร่งแสง
     fig.add_trace(go.Mesh3d(
         x=[0, pallet_w, pallet_w, 0], y=[0, 0, pallet_l, pallet_l], z=[max_air_height]*4,
-        color='#ef4444', opacity=0.12, name='Limit Height'
+        color='#ef4444', opacity=0.08, name='Limit Height'
     ))
     
-    # --- ปรับปรุงสูตรควบคุมสเกล (True Geometric Scale Logic) ---
-    # ใช้ค่าขนาดกว้าง-ยาวจริงของพาเลทเป็นฐานในการคำนวณอัตราส่วนแกนภาพแทนการใช้ความสูงสูงสุดขยายตัวเลข
+    # ล็อกมิติตามสเกลเรขาคณิตจริง
     base_max = max(pallet_w, pallet_l)
-    
     fig.update_layout(
         scene=dict(
             xaxis=dict(title='Width (mm)', range=[-100, pallet_w + 100]),
             yaxis=dict(title='Length (mm)', range=[-100, pallet_l + 100]),
             zaxis=dict(title='Height (mm)', range=[0, max_air_height + 100]),
-            # บังคับการล็อกอัตราส่วนสัมพันธ์ตามขนาดเรขาคณิตกายภาพจริงของโมเดล (1 มิลลิเมตรเท่ากันทุกแกน)
             aspectmode='manual',
             aspectratio=dict(
                 x=pallet_w / base_max,
@@ -237,7 +274,7 @@ def generate_plotly_3d(params, color_theme, edge_theme):
         ),
         margin=dict(r=0, l=0, b=0, t=30),
         showlegend=False,
-        height=600
+        height=650
     )
     return fig
 
@@ -249,7 +286,7 @@ with col1:
     res1 = normal_cases[0]
     st.metric("จำนวนรวม", f"{res1['TOTAL_BOXES']} ใบ", f"สูงรวม {res1['TOTAL_HEIGHT']} mm")
     
-    t1, t2, t3 = st.tabs(["🔝 Top View (SVG)", "📐 2D Side Views", "🌐 Interactive 3D"])
+    t1, t2, t3 = st.tabs(["🔝 Top View (SVG)", "📐 2D Side Views", "🌐 Industrial 3D"])
     with t1:
         st.write(generate_svg_pallet_layer(res1, "#16a34a"), unsafe_allow_html=True)
     with t2:
@@ -264,7 +301,7 @@ with col2:
     res2 = alt_cases[0]
     st.metric("จำนวนรวม", f"{res2['TOTAL_BOXES']} ใบ", f"สูงรวม {res2['TOTAL_HEIGHT']} mm")
     
-    t4, t5, t6 = st.tabs(["🔝 Top View (SVG)", "📐 2D Side Views", "🌐 Interactive 3D"])
+    t4, t5, t6 = st.tabs(["🔝 Top View (SVG)", "📐 2D Side Views", "🌐 Industrial 3D"])
     with t4:
         st.write(generate_svg_pallet_layer(res2, "#2563eb"), unsafe_allow_html=True)
     with t5:
