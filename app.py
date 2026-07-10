@@ -5,13 +5,13 @@ import plotly.graph_objects as go
 
 # --- การตั้งค่าหน้าเว็บ ---
 st.set_page_config(
-    page_title="Industrial Palletizing Optimizer V7.0", 
+    page_title="Industrial Palletizing Optimizer V7.1", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("📦 Carton Palletizing Layout Optimizer (Version 7.0)")
-st.write("เครื่องมือจำลองการจัดวางระดับอุตสาหกรรม (เพิ่มฉากกระดาษมุม Corner Guard + สายรัดพลาสติก Strap + ล็อกสเกลจริง)")
+st.title("📦 Carton Palletizing Layout Optimizer (Version 7.1)")
+st.write("เครื่องมือจำลองการจัดวางระดับอุตสาหกรรม (แก้ไข Bug พิกัดฉากกระดาษและล็อกสเกลเรขาคณิตเรียบร้อย)")
 
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("1. ข้อมูลกล่องสินค้า (mm)")
@@ -156,7 +156,7 @@ def generate_2d_side_views(params, color_theme, view_type='front'):
     plt.tight_layout()
     return fig
 
-# --- PLOTLY 3D ENGINE (INDUSTRIAL MODE: CORNER GUARDS & STRAPS) ---
+# --- PLOTLY 3D ENGINE (INDUSTRIAL MODE) ---
 def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color, opacity=1.0):
     fig.add_trace(go.Mesh3d(
         x=[x, x+dx, x+dx, x, x, x+dx, x+dx, x],
@@ -173,7 +173,6 @@ def draw_plotly_cube(fig, x, y, z, dx, dy, dz, color, line_color, opacity=1.0):
         lightposition=dict(x=0, y=0, z=0)
     ))
     
-    # วาด Wireframe
     if opacity == 1.0:
         for edge in [
             ([x, x+dx], [y, y], [z, z]), ([x, x], [y, y+dy], [z, z]), ([x+dx, x+dx], [y, y+dy], [z, z]), ([x, x+dx], [y+dy, y+dy], [z, z]),
@@ -204,35 +203,37 @@ def generate_plotly_3d(params, color_theme, edge_theme):
                 gx = ox + i * (bw + box_tolerance)
                 draw_plotly_cube(fig, gx, gy, gz, bw, bl, bh, color_theme, edge_theme)
                 
-    # 3. 🛡️ วาด PAPER CORNER GUARDS (ฉากกระดาษป้องกันมุมอุตสาหกรรม 4 มุมหลัก)
-    guard_size = 40  # ปีกกว้าง 40 mm
-    g_th = 5        # ความหนาฉากกระดาษ
-    g_h = cargo_top_z - pallet_h  # ความสูงของการป้องกันเท่ากับกองสินค้า
+    # 3. 🛡️ วาด PAPER CORNER GUARDS (ฉากกระดาษป้องกันมุม 4 มุมหลัก)
+    g_sz = 40  # ความกว้างปีกฉากกระดาษมุม 40mm
+    g_th = 6   # ความหนาฉากกระดาษ 6mm
+    g_h = cargo_top_z - pallet_h  # ความสูงฉากเท่ากับกองสินค้า
+    c_guard = '#94a3b8'  # สีฉากกระดาษเทาอ่อนมาตรฐาน
+    c_line = '#475569'   # สีเส้นขอบฉาก
     
     # มุมที่ 1: หน้าซ้าย
-    draw_plotly_cube(fig, ox - g_th, oy - g_th, pallet_h, guard_size, g_th, g_h, '#94a3b8', '#64748b')
-    draw_plotly_cube(fig, ox - g_th, oy, g_th, guard_size, g_h, '#94a3b8', '#64748b')
+    draw_plotly_cube(fig, ox - g_th, oy - g_th, pallet_h, g_sz, g_th, g_h, c_guard, c_line)
+    draw_plotly_cube(fig, ox - g_th, oy, pallet_h, g_th, g_sz, g_h, c_guard, c_line)
     # มุมที่ 2: หน้าขวา
-    draw_plotly_cube(fig, ox + params["USED_W"] - guard_size + g_th, oy - g_th, pallet_h, guard_size, g_th, g_h, '#94a3b8', '#64748b')
-    draw_plotly_cube(fig, ox + params["USED_W"], oy, pallet_h, g_th, guard_size, g_h, '#94a3b8', '#64748b')
+    draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, oy - g_th, pallet_h, g_sz, g_th, g_h, c_guard, c_line)
+    draw_plotly_cube(fig, ox + params["USED_W"], oy, pallet_h, g_th, g_sz, g_h, c_guard, c_line)
     # มุมที่ 3: หลังซ้าย
-    draw_plotly_cube(fig, ox - g_th, ox = ox, oy + params["USED_L"], pallet_h, guard_size, g_th, g_h, '#94a3b8', '#64748b') # ล็อกระนาบหลัง
-    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"] - guard_size, pallet_h, g_th, guard_size, g_h, '#94a3b8', '#64748b')
+    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"], pallet_h, g_sz, g_th, g_h, c_guard, c_line)
+    draw_plotly_cube(fig, ox - g_th, oy + params["USED_L"] - g_sz, pallet_h, g_th, g_sz, g_h, c_guard, c_line)
     # มุมที่ 4: หลังขวา
-    draw_plotly_cube(fig, ox + params["USED_W"] - guard_size + g_th, oy + params["USED_L"], pallet_h, guard_size, g_th, g_h, '#94a3b8', '#64748b')
-    draw_plotly_cube(fig, ox + params["USED_W"], oy + params["USED_L"] - guard_size, pallet_h, g_th, guard_size, g_h, '#94a3b8', '#64748b')
+    draw_plotly_cube(fig, ox + params["USED_W"] - g_sz + g_th, oy + params["USED_L"], pallet_h, g_sz, g_th, g_h, c_guard, c_line)
+    draw_plotly_cube(fig, ox + params["USED_W"], oy + params["USED_L"] - g_sz, pallet_h, g_th, g_sz, g_h, c_guard, c_line)
     
     # 4. 🔲 วาด TOP EDGE GUARDS (กรอบฉากกระดาษป้องกันรัดมุมด้านบนสุด 4 ด้าน)
-    draw_plotly_cube(fig, ox, oy - g_th, cargo_top_z, params["USED_W"], g_th, g_th, '#e2e8f0', '#64748b')
-    draw_plotly_cube(fig, ox, oy + params["USED_L"], cargo_top_z, params["USED_W"], g_th, g_th, '#e2e8f0', '#64748b')
-    draw_plotly_cube(fig, ox - g_th, oy, cargo_top_z, g_th, params["USED_L"], g_th, '#e2e8f0', '#64748b')
-    draw_plotly_cube(fig, ox + params["USED_W"], oy, cargo_top_z, g_th, params["USED_L"], g_th, '#e2e8f0', '#64748b')
+    draw_plotly_cube(fig, ox, oy - g_th, cargo_top_z, params["USED_W"], g_th, g_th, '#e2e8f0', c_line)
+    draw_plotly_cube(fig, ox, oy + params["USED_L"], cargo_top_z, params["USED_W"], g_th, g_th, '#e2e8f0', c_line)
+    draw_plotly_cube(fig, ox - g_th, oy, cargo_top_z, g_th, params["USED_L"], g_th, '#e2e8f0', c_line)
+    draw_plotly_cube(fig, ox + params["USED_W"], oy, cargo_top_z, g_th, params["USED_L"], g_th, '#e2e8f0', c_line)
 
-    # 5. 🧵 วาด STRAPS (สายรัดพลาสติกเหล็ก/PP เส้นคู่แนวตั้งรอบกองสินค้าตามหลัก Packaging)
-    strap_color = '#1e3a8a' # สายรัดสีกรมท่าเข้มอุตสาหกรรม
-    s_w = 4.0               # ความหนาเส้นกราฟิก
+    # 5. 🧵 วาด STRAPS (สายรัดพลาสติกสีกรมท่าเข้ม รัดรอบกองสินค้าแนวตั้งแกนละ 2 เส้น)
+    strap_color = '#1e3a8a'
+    s_w = 4.0
     
-    # รัดแนวแกน X (ตัดผ่านความกว้างของกองกล่อง 2 เส้น)
+    # รัดแนวแกน X (ตัดผ่านหน้ากว้างของกองกล่อง 2 เส้นที่ระยะ 25% และ 75%)
     x_positions = [ox + (params["USED_W"] * 0.25), ox + (params["USED_W"] * 0.75)]
     for sx in x_positions:
         fig.add_trace(go.Scatter3d(
@@ -242,7 +243,7 @@ def generate_plotly_3d(params, color_theme, edge_theme):
             mode='lines', line=dict(color=strap_color, width=s_w), showlegend=False
         ))
         
-    # รัดแนวแกน Y (ตัดผ่านความยาวของกองกล่อง 2 เส้น)
+    # รัดแนวแกน Y (ตัดผ่านหน้ายาวของกองกล่อง 2 เส้นที่ระยะ 25% และ 75%)
     y_positions = [oy + (params["USED_L"] * 0.25), oy + (params["USED_L"] * 0.75)]
     for sy in y_positions:
         fig.add_trace(go.Scatter3d(
