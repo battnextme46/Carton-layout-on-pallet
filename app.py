@@ -12,7 +12,7 @@ import streamlit as st
 # =========================================================
 # PAGE CONFIG
 # =========================================================
-APP_VERSION = "V0.3B.1"
+APP_VERSION = "V0.3C.1"
 MODULE_NAME = "Module 02 — Carton Palletizing Optimizer"
 EPS = 1e-9
 MAX_EXHAUSTIVE_PARTIAL_COMBINATIONS = 50000
@@ -77,7 +77,7 @@ st.markdown(
 st.title("📦 Carton Palletizing Layout Optimizer")
 st.caption(
     f"{APP_VERSION} • NPI Packaging Engineering Toolkit • {MODULE_NAME} "
-    "— Professional 3D Render Export + Document-ready PNG/SVG + True-scale Engineering View"
+    "— Core Professional 2.5D Isometric Renderer + Document-ready Export + True-scale Engineering View"
 )
 
 
@@ -242,7 +242,7 @@ prefer_simple_on_safe_tie = st.sidebar.checkbox(
 )
 
 st.sidebar.caption(
-    "V0.3B.1 ใช้ Smart Floor Solver เดิมจาก V0.3A และปรับ Professional 3D Render Export ให้เสถียรและสมบูรณ์ขึ้น "
+    "V0.3C.1 ใช้ Smart Floor Solver เดิมและเปลี่ยน Professional Export เป็น Fixed Isometric 2.5D Renderer "
     "โดยการหมุนกล่องบนพื้น 90° ยังไม่ถือว่าเป็นการเปลี่ยน H-Up / L-Up / W-Up"
 )
 
@@ -2558,7 +2558,9 @@ def generate_plotly_3d(
 
 
 # =========================================================
-# PROFESSIONAL 3D RENDER EXPORT (PNG) — STABLE V0.3B.1
+# PROFESSIONAL 2.5D RENDERER — V0.3C.1
+# Stable fixed-view oblique/isometric-style illustration.
+# C.1 intentionally contains only Cartons + Pallet.
 # =========================================================
 def hex_to_rgb(value):
     value = str(value).strip().lstrip("#")
@@ -2574,18 +2576,33 @@ def rgb_to_hex(rgb):
 
 def mix_rgb(rgb, factor):
     if factor >= 1.0:
-        return tuple(min(255, int(round(c + (255 - c) * (factor - 1.0)))) for c in rgb)
-    return tuple(max(0, int(round(c * factor))) for c in rgb)
+        return tuple(
+            min(255, int(round(c + (255 - c) * (factor - 1.0))))
+            for c in rgb
+        )
+    return tuple(
+        max(0, int(round(c * factor)))
+        for c in rgb
+    )
 
 
-def iso_project_point(x, y, z, angle_deg=30.0, z_scale=1.0):
-    angle = math.radians(angle_deg)
-    sx = (x - y) * math.cos(angle)
-    py = (x + y) * math.sin(angle) - z * z_scale
-    return sx, py
+def iso25_project(x, y, z, depth_x=0.42, depth_y=0.22):
+    """
+    Fixed front-right 2.5D projection.
+
+    X remains the dominant horizontal engineering axis.
+    Y recedes up/right using fixed depth factors.
+    Z remains vertical.
+
+    This is deliberately NOT a 3D camera.  Because the projection is fixed,
+    drawing order and visible faces are deterministic and document-safe.
+    """
+    sx = x + y * depth_x
+    sy = -z - y * depth_y
+    return sx, sy
 
 
-def cuboid_vertices(x, y, z, dx, dy, dz):
+def prism_vertices(x, y, z, dx, dy, dz):
     return [
         (x, y, z),
         (x + dx, y, z),
@@ -2598,330 +2615,543 @@ def cuboid_vertices(x, y, z, dx, dy, dz):
     ]
 
 
-def professional_render_objects(layout, carton_count, box_vertical_h):
-    """
-    Build a clean and stable illustration scene for document export.
-    Accessories such as straps / guards are not built as full 3D cuboids anymore;
-    they are rendered as controlled overlay graphics to avoid broken occlusion.
-    """
-    layers = build_display_stack(layout, carton_count)
-    cargo_top_z = pallet_h + len(layers) * box_vertical_h if layers else pallet_h
-
-    objects = []
-
-    # ------------------------------
-    # Pallet structure
-    # ------------------------------
-    bottom_deck_h = max(14.0, pallet_h * 0.14)
-    top_deck_h = max(18.0, pallet_h * 0.18)
-    middle_h = max(pallet_h - bottom_deck_h - top_deck_h, 18.0)
-    opening_margin_y = max(12.0, pallet_l * 0.05)
-    stringer_l = max(pallet_l - 2 * opening_margin_y, pallet_l * 0.76)
-    stringer_w = min(max(pallet_w * 0.14, 78.0), pallet_w / 4.3)
-
-    def add_prism(x, y, z, dx, dy, dz, base_fill, edge, obj_type="generic"):
-        base_rgb = hex_to_rgb(base_fill)
-        objects.append({
-            "type": obj_type,
-            "x": x,
-            "y": y,
-            "z": z,
-            "dx": dx,
-            "dy": dy,
-            "dz": dz,
-            "fill_top": rgb_to_hex(mix_rgb(base_rgb, 1.09)),
-            "fill_left": rgb_to_hex(mix_rgb(base_rgb, 0.84)),
-            "fill_right": rgb_to_hex(mix_rgb(base_rgb, 0.96)),
-            "edge": edge,
-        })
-
-    pallet_edge = "#6a4a27"
-    add_prism(0.0, 0.0, 0.0, pallet_w, pallet_l, bottom_deck_h, "#b98543", pallet_edge, "pallet")
-
-    stringer_positions = [pallet_w * 0.08, pallet_w * 0.42, pallet_w * 0.76]
-    for sx in stringer_positions:
-        sx = min(max(sx, 0.0), max(pallet_w - stringer_w, 0.0))
-        add_prism(sx, opening_margin_y, bottom_deck_h, stringer_w, stringer_l, middle_h, "#9f6b32", pallet_edge, "pallet")
-
-    add_prism(0.0, 0.0, bottom_deck_h + middle_h, pallet_w, pallet_l, top_deck_h, "#c99654", pallet_edge, "pallet")
-
-    # Optional top slats for a more industrial look.
-    top_surface_z = bottom_deck_h + middle_h + top_deck_h
-    slat_gap = max(8.0, pallet_w * 0.012)
-    slat_count = 5
-    slat_w = (pallet_w - slat_gap * (slat_count - 1)) / slat_count
-    slat_h = max(7.0, top_deck_h * 0.22)
-    sx = 0.0
-    for _ in range(slat_count):
-        add_prism(sx, 0.0, top_surface_z - slat_h, slat_w, pallet_l, slat_h, "#d8aa6c", pallet_edge, "pallet")
-        sx += slat_w + slat_gap
-
-    # ------------------------------
-    # Cartons
-    # ------------------------------
-    carton_fill = {
-        "A": "#d59528",
-        "B": "#c9851d",
-    }
-    carton_edge = "#6b4820"
-
-    for layer_idx, layer_positions in enumerate(layers):
-        z = pallet_h + layer_idx * box_vertical_h
-        for p in layer_positions:
-            add_prism(
-                p["x"], p["y"], z,
-                p["w"], p["l"], box_vertical_h,
-                carton_fill.get(p["ROT"], "#cf8d22"),
-                carton_edge,
-                "carton",
-            )
-
-    return objects, layers, cargo_top_z
-
-
-def object_draw_key(obj):
-    # Painter's algorithm: back-to-front for fixed isometric view.
-    return (
-        obj["x"] + obj["y"] + obj["z"] * 0.42,
-        obj["z"],
-        obj["type"] != "pallet",
-    )
-
-
-def projected_face_records(obj):
-    verts = cuboid_vertices(obj["x"], obj["y"], obj["z"], obj["dx"], obj["dy"], obj["dz"])
-    faces = [
-        ("left", [2, 3, 7, 6], obj["fill_left"]),
-        ("right", [1, 2, 6, 5], obj["fill_right"]),
-        ("top", [4, 5, 6, 7], obj["fill_top"]),
-    ]
-
+def project_polygon(points3, offset_x, offset_y, scale):
     out = []
-    for name, idxs, fill in faces:
-        pts3 = [verts[i] for i in idxs]
-        depth = sum((p[0] + p[1] + p[2] * 0.55) for p in pts3) / len(pts3)
-        out.append({
-            "name": name,
-            "points3": pts3,
-            "fill": fill,
-            "outline": obj["edge"],
-            "depth": depth,
-            "obj_type": obj["type"],
-        })
-    out.sort(key=lambda r: r["depth"])
+    for x, y, z in points3:
+        px, py = iso25_project(x, y, z)
+        out.append((offset_x + px * scale, offset_y + py * scale))
     return out
 
 
-def projected_bounds_from_faces(face_records, angle_deg=30.0):
-    proj = []
-    for face in face_records:
-        for x, y, z in face["points3"]:
-            proj.append(iso_project_point(x, y, z, angle_deg=angle_deg, z_scale=1.0))
-    min_px = min(p[0] for p in proj)
-    max_px = max(p[0] for p in proj)
-    min_py = min(p[1] for p in proj)
-    max_py = max(p[1] for p in proj)
-    return min_px, max_px, min_py, max_py
+def iso25_visible_faces(x, y, z, dx, dy, dz):
+    """Only faces intentionally visible from the fixed front-right view."""
+    v = prism_vertices(x, y, z, dx, dy, dz)
+    return {
+        "front": [v[i] for i in [0, 1, 5, 4]],  # y = minimum
+        "right": [v[i] for i in [1, 2, 6, 5]],  # x = maximum
+        "top": [v[i] for i in [4, 5, 6, 7]],
+    }
 
 
-def draw_polyline_projected(draw, points3, offset_x, offset_y, scale, color, width, angle_deg=30.0, close_path=False):
-    pts2 = []
-    for x, y, z in points3:
-        px, py = iso_project_point(x, y, z, angle_deg=angle_deg, z_scale=1.0)
-        pts2.append((offset_x + px * scale, offset_y + py * scale))
+def draw_iso25_prism(
+    draw,
+    x,
+    y,
+    z,
+    dx,
+    dy,
+    dz,
+    base_fill,
+    outline,
+    offset_x,
+    offset_y,
+    scale,
+    line_width,
+    show_front=True,
+    show_right=True,
+    show_top=True,
+):
+    base_rgb = hex_to_rgb(base_fill)
+    fills = {
+        "front": rgb_to_hex(mix_rgb(base_rgb, 0.98)),
+        "right": rgb_to_hex(mix_rgb(base_rgb, 0.82)),
+        "top": rgb_to_hex(mix_rgb(base_rgb, 1.11)),
+    }
 
-    if close_path and pts2:
-        draw.line(pts2 + [pts2[0]], fill=color, width=max(1, int(round(width))))
-    else:
-        draw.line(pts2, fill=color, width=max(1, int(round(width))))
+    visible = {
+        "front": show_front,
+        "right": show_right,
+        "top": show_top,
+    }
+
+    faces = iso25_visible_faces(x, y, z, dx, dy, dz)
+
+    # Side faces first, top last.  Rear faces are never created.
+    for face_name in ["front", "right", "top"]:
+        if not visible[face_name]:
+            continue
+
+        pts = project_polygon(
+            faces[face_name],
+            offset_x,
+            offset_y,
+            scale,
+        )
+
+        draw.polygon(
+            pts,
+            fill=fills[face_name],
+        )
+
+        draw.line(
+            pts + [pts[0]],
+            fill=outline,
+            width=max(1, int(round(line_width))),
+            joint="curve",
+        )
 
 
-def draw_strap_overlays(draw, bounds, cargo_top_z, offset_x, offset_y, scale, strap_px, angle_deg=30.0):
-    min_x = bounds["MIN_X"]
-    min_y = bounds["MIN_Y"]
-    max_x = bounds["MAX_X"]
-    max_y = bounds["MAX_Y"]
-    used_w = bounds["SPAN_W"]
-    used_l = bounds["SPAN_L"]
-
-    strap_color = "#23395d"
-    strap_shadow = "#122138"
-
-    # Wraps running mainly along the Y direction.
-    for frac in (0.28, 0.72):
-        x_pos = min_x + used_w * frac
-        path = [
-            (x_pos, min_y, pallet_h),
-            (x_pos, min_y, cargo_top_z),
-            (x_pos, max_y, cargo_top_z),
-            (x_pos, max_y, pallet_h),
-        ]
-        draw_polyline_projected(draw, path, offset_x, offset_y, scale, strap_shadow, strap_px + 2, angle_deg)
-        draw_polyline_projected(draw, path, offset_x, offset_y, scale, strap_color, strap_px, angle_deg)
-
-    # Wraps running mainly along the X direction.
-    for frac in (0.34, 0.66):
-        y_pos = min_y + used_l * frac
-        path = [
-            (min_x, y_pos, pallet_h),
-            (max_x, y_pos, pallet_h),
-            (max_x, y_pos, cargo_top_z),
-            (min_x, y_pos, cargo_top_z),
-        ]
-        draw_polyline_projected(draw, path, offset_x, offset_y, scale, strap_shadow, strap_px + 2, angle_deg)
-        draw_polyline_projected(draw, path, offset_x, offset_y, scale, strap_color, strap_px, angle_deg)
+def iso25_placement_key(p):
+    return (
+        round(p["x"], 3),
+        round(p["y"], 3),
+        round(p["w"], 3),
+        round(p["l"], 3),
+        p.get("ROT", "A"),
+    )
 
 
-def draw_corner_guard_overlays(draw, bounds, cargo_top_z, offset_x, offset_y, scale, guard_px, angle_deg=30.0):
-    min_x = bounds["MIN_X"]
-    min_y = bounds["MIN_Y"]
-    max_x = bounds["MAX_X"]
-    max_y = bounds["MAX_Y"]
+def iso25_has_right_neighbor(p, layer_positions):
+    """
+    Hide the side face between cartons that are essentially touching in the
+    same row. This keeps internal carton interfaces from becoming thick 2.5D
+    wedges while preserving the exterior right face of the stack.
+    """
+    face_x = p["x"] + p["w"]
+    tolerance = max(5.0, box_gap + 3.0)
 
-    guard_color = "#d7dde3"
-    guard_edge = "#6b7280"
+    for q in layer_positions:
+        if q is p:
+            continue
 
-    # Top perimeter.
-    top_loop = [
-        (min_x, min_y, cargo_top_z),
-        (max_x, min_y, cargo_top_z),
-        (max_x, max_y, cargo_top_z),
-        (min_x, max_y, cargo_top_z),
+        horizontal_gap = q["x"] - face_x
+
+        if horizontal_gap < -EPS or horizontal_gap > tolerance:
+            continue
+
+        overlap_y = max(
+            0.0,
+            min(p["y"] + p["l"], q["y"] + q["l"])
+            - max(p["y"], q["y"]),
+        )
+
+        if overlap_y >= min(p["l"], q["l"]) * 0.60:
+            return True
+
+    return False
+
+
+def pallet_25d_parts():
+    """
+    Stable stylized industrial pallet built from a small number of complete
+    solids.  The model intentionally favors clarity over photoreal detail.
+    """
+    bottom_h = max(18.0, pallet_h * 0.15)
+    top_h = max(24.0, pallet_h * 0.20)
+    support_h = max(pallet_h - bottom_h - top_h, 22.0)
+
+    support_w = min(
+        max(pallet_w * 0.13, 85.0),
+        pallet_w * 0.22,
+    )
+
+    support_l = max(
+        pallet_l * 0.82,
+        pallet_l - 120.0,
+    )
+
+    y0 = (pallet_l - support_l) / 2.0
+
+    supports_x = [
+        pallet_w * 0.07,
+        pallet_w * 0.50 - support_w / 2.0,
+        pallet_w * 0.93 - support_w,
     ]
-    draw_polyline_projected(draw, top_loop, offset_x, offset_y, scale, guard_edge, guard_px + 2, angle_deg, close_path=True)
-    draw_polyline_projected(draw, top_loop, offset_x, offset_y, scale, guard_color, guard_px, angle_deg, close_path=True)
 
-    # Four corners.
-    for x_pos, y_pos in [
-        (min_x, min_y),
-        (max_x, min_y),
-        (max_x, max_y),
-        (min_x, max_y),
-    ]:
-        line3 = [
-            (x_pos, y_pos, pallet_h),
-            (x_pos, y_pos, cargo_top_z),
-        ]
-        draw_polyline_projected(draw, line3, offset_x, offset_y, scale, guard_edge, guard_px + 2, angle_deg)
-        draw_polyline_projected(draw, line3, offset_x, offset_y, scale, guard_color, guard_px, angle_deg)
+    parts = [
+        {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0,
+            "dx": pallet_w,
+            "dy": pallet_l,
+            "dz": bottom_h,
+            "fill": "#B98243",
+            "outline": "#654723",
+        }
+    ]
+
+    for sx in supports_x:
+        parts.append(
+            {
+                "x": max(
+                    0.0,
+                    min(sx, pallet_w - support_w),
+                ),
+                "y": y0,
+                "z": bottom_h,
+                "dx": support_w,
+                "dy": support_l,
+                "dz": support_h,
+                "fill": "#9F6C34",
+                "outline": "#654723",
+            }
+        )
+
+    parts.append(
+        {
+            "x": 0.0,
+            "y": 0.0,
+            "z": bottom_h + support_h,
+            "dx": pallet_w,
+            "dy": pallet_l,
+            "dz": top_h,
+            "fill": "#CA9654",
+            "outline": "#654723",
+        }
+    )
+
+    return parts
 
 
-def generate_professional_3d_png(scenario, layout, carton_count, preset_name, include_footer):
+def iso25_scene_bounds(layout, carton_count, box_vertical_h):
+    layers = build_display_stack(
+        layout,
+        carton_count,
+    )
+
+    points = []
+
+    for p in prism_vertices(
+        0.0,
+        0.0,
+        0.0,
+        pallet_w,
+        pallet_l,
+        pallet_h,
+    ):
+        points.append(p)
+
+    for layer_idx, layer_positions in enumerate(layers):
+        z = pallet_h + layer_idx * box_vertical_h
+
+        for p in layer_positions:
+            points.extend(
+                prism_vertices(
+                    p["x"],
+                    p["y"],
+                    z,
+                    p["w"],
+                    p["l"],
+                    box_vertical_h,
+                )
+            )
+
+    projected = [
+        iso25_project(*p)
+        for p in points
+    ]
+
+    return {
+        "layers": layers,
+        "min_px": min(p[0] for p in projected),
+        "max_px": max(p[0] for p in projected),
+        "min_py": min(p[1] for p in projected),
+        "max_py": max(p[1] for p in projected),
+    }
+
+
+def generate_professional_25d_png(
+    scenario,
+    layout,
+    carton_count,
+    preset_name,
+    include_footer,
+    clean_mode=False,
+):
     preset = EXPORT_PRESETS[preset_name]
     canvas_w = preset["width"]
     canvas_h = preset["height"]
 
-    image = Image.new("RGB", (canvas_w, canvas_h), "white")
+    image = Image.new(
+        "RGB",
+        (canvas_w, canvas_h),
+        "white",
+    )
+
     draw = ImageDraw.Draw(image)
 
-    title_font = load_export_font(preset["title"], bold=True)
-    subtitle_font = load_export_font(preset["subtitle"], bold=False)
-    small_font = load_export_font(preset["small"], bold=False)
-
-    title_h = int(canvas_h * 0.10)
-    footer_h = int(canvas_h * 0.13) if include_footer else int(canvas_h * 0.05)
-    margin_x = int(canvas_w * 0.05)
-    margin_top = title_h
-    margin_bottom = footer_h
-    plot_w = canvas_w - 2 * margin_x
-    plot_h = canvas_h - margin_top - margin_bottom
-
-    displayed_load_h = pallet_h + len(build_display_stack(layout, carton_count)) * scenario["GROUP"]["BOX_VERTICAL_H"] if carton_count > 0 else pallet_h
-
-    pil_text_center(draw, (canvas_w / 2, preset["title"] * 0.9), "Professional 3D Packaging Render", title_font, "#111827")
-    subtitle = (
-        f"{carton_count} cartons | {layout['STRATEGY']} | {scenario['GROUP']['UP_AXIS']}-Up | "
-        f"Load H {displayed_load_h:.0f} mm"
+    title_font = load_export_font(
+        preset["title"],
+        bold=True,
     )
-    pil_text_center(draw, (canvas_w / 2, preset["title"] + preset["subtitle"] * 1.30), subtitle, subtitle_font, "#475569")
 
-    objects, layers, cargo_top_z = professional_render_objects(layout, carton_count, scenario["GROUP"]["BOX_VERTICAL_H"])
-    face_records = []
-    for obj in sorted(objects, key=object_draw_key):
-        face_records.extend(projected_face_records(obj))
+    subtitle_font = load_export_font(
+        preset["subtitle"],
+        bold=False,
+    )
 
-    angle_deg = 30.0
-    min_px, max_px, min_py, max_py = projected_bounds_from_faces(face_records, angle_deg=angle_deg)
+    small_font = load_export_font(
+        preset["small"],
+        bold=False,
+    )
 
-    span_x = max(max_px - min_px, 1.0)
-    span_y = max(max_py - min_py, 1.0)
-    scale = min(plot_w / span_x, plot_h / span_y) * 0.92
-    offset_x = margin_x + (plot_w - span_x * scale) / 2.0 - min_px * scale
-    offset_y = margin_top + (plot_h - span_y * scale) / 2.0 - min_py * scale
+    title_h = int(
+        canvas_h
+        * (0.07 if clean_mode else 0.11)
+    )
+
+    footer_h = (
+        int(canvas_h * 0.13)
+        if include_footer and not clean_mode
+        else int(canvas_h * 0.045)
+    )
+
+    margin_x = int(canvas_w * 0.055)
+    plot_top = title_h
+    plot_bottom = canvas_h - footer_h
+    plot_w = canvas_w - 2 * margin_x
+    plot_h = plot_bottom - plot_top
+
+    if not clean_mode:
+        pil_text_center(
+            draw,
+            (
+                canvas_w / 2,
+                preset["title"] * 0.88,
+            ),
+            "Professional 2.5D Packaging Illustration",
+            title_font,
+            "#111827",
+        )
+
+        subtitle = (
+            f"{carton_count} cartons | "
+            f"{layout['STRATEGY']} | "
+            f"{scenario['GROUP']['UP_AXIS']}-Up"
+        )
+
+        pil_text_center(
+            draw,
+            (
+                canvas_w / 2,
+                preset["title"]
+                + preset["subtitle"] * 1.35,
+            ),
+            subtitle,
+            subtitle_font,
+            "#475569",
+        )
+
+    box_vertical_h = scenario["GROUP"]["BOX_VERTICAL_H"]
+
+    scene = iso25_scene_bounds(
+        layout,
+        carton_count,
+        box_vertical_h,
+    )
+
+    span_x = max(
+        scene["max_px"] - scene["min_px"],
+        1.0,
+    )
+
+    span_y = max(
+        scene["max_py"] - scene["min_py"],
+        1.0,
+    )
+
+    scale = min(
+        plot_w / span_x,
+        plot_h / span_y,
+    ) * 0.92
+
+    offset_x = (
+        margin_x
+        + (plot_w - span_x * scale) / 2.0
+        - scene["min_px"] * scale
+    )
+
+    offset_y = (
+        plot_top
+        + (plot_h - span_y * scale) / 2.0
+        - scene["min_py"] * scale
+    )
 
     # Ground shadow.
-    shadow_path3 = [
-        (-25.0, -15.0, 0.0),
-        (pallet_w + 25.0, -15.0, 0.0),
-        (pallet_w + 25.0, pallet_l + 15.0, 0.0),
-        (-25.0, pallet_l + 15.0, 0.0),
+    shadow_world = [
+        (-25.0, -20.0, 0.0),
+        (pallet_w + 45.0, -20.0, 0.0),
+        (pallet_w + 45.0, pallet_l + 45.0, 0.0),
+        (-25.0, pallet_l + 45.0, 0.0),
     ]
-    shadow_pts = []
-    for x, y, z in shadow_path3:
-        px, py = iso_project_point(x, y, z, angle_deg=angle_deg, z_scale=1.0)
-        shadow_pts.append((offset_x + px * scale, offset_y + py * scale + max(7, preset['line'] * 3.5)))
-    draw.polygon(shadow_pts, fill="#e7eaee")
 
-    # Render visible prism faces.
-    for face in sorted(face_records, key=lambda r: r["depth"]):
-        pts2 = []
-        for x, y, z in face["points3"]:
-            px, py = iso_project_point(x, y, z, angle_deg=angle_deg, z_scale=1.0)
-            pts2.append((offset_x + px * scale, offset_y + py * scale))
-        draw.polygon(pts2, fill=face["fill"], outline=face["outline"])
-        draw.line(pts2 + [pts2[0]], fill=face["outline"], width=max(1, int(round(preset["line"] * 0.45))))
-
-    # Overlay accessories in 2D projected space for a cleaner document render.
-    bounds = placement_bounds(layout["PLACEMENTS"])
-    if layout["PLACEMENTS"] and cargo_top_z > pallet_h:
-        if show_corner_guards:
-            draw_corner_guard_overlays(
-                draw, bounds, cargo_top_z, offset_x, offset_y, scale,
-                guard_px=max(2, int(round(preset["line"] * 1.1))),
-                angle_deg=angle_deg,
-            )
-        if show_straps:
-            draw_strap_overlays(
-                draw, bounds, cargo_top_z, offset_x, offset_y, scale,
-                strap_px=max(2, int(round(preset["line"] * 1.25))),
-                angle_deg=angle_deg,
-            )
-
-    # Height limit plane / line.
-    if show_height_plane:
-        plane_loop3 = [
-            (0.0, 0.0, max_total_height),
-            (pallet_w, 0.0, max_total_height),
-            (pallet_w, pallet_l, max_total_height),
-            (0.0, pallet_l, max_total_height),
-        ]
-        plane_pts = []
-        for x, y, z in plane_loop3:
-            px, py = iso_project_point(x, y, z, angle_deg=angle_deg, z_scale=1.0)
-            plane_pts.append((offset_x + px * scale, offset_y + py * scale))
-        draw.polygon(plane_pts, fill="#fef2f2", outline="#dc2626")
-        draw.line(plane_pts + [plane_pts[0]], fill="#dc2626", width=max(1, int(round(preset["line"] * 0.75))))
-
-    if include_footer:
-        footer_1, footer_2 = export_footer_lines(scenario, layout, carton_count)
-        line_y = canvas_h - footer_h
-        draw.line((margin_x, line_y, canvas_w - margin_x, line_y), fill="#cbd5e1", width=2)
-        draw.text((margin_x, line_y + preset["small"] * 0.9), footer_1, font=small_font, fill="#334155")
-        draw.text((margin_x, line_y + preset["small"] * 2.35), footer_2, font=small_font, fill="#334155")
-        pil_text_right(draw, (canvas_w - margin_x, line_y + preset["small"] * 2.35), "Professional isometric packaging illustration", small_font, "#64748b")
-        note_y = line_y - preset["small"] * 1.8
-    else:
-        note_y = canvas_h - preset["small"] * 1.85
-
-    draw.text(
-        (margin_x, note_y),
-        "Rendered from current layout • Accessories are illustrative engineering communication aids",
-        font=small_font,
-        fill="#64748b",
+    shadow = project_polygon(
+        shadow_world,
+        offset_x,
+        offset_y + max(7, preset["line"] * 3),
+        scale,
     )
 
+    draw.polygon(
+        shadow,
+        fill="#E7EAEE",
+    )
+
+    # Pallet first — complete and independent from carton ordering.
+    pallet_line = max(
+        1.4,
+        preset["line"] * 0.48,
+    )
+
+    for part in pallet_25d_parts():
+        draw_iso25_prism(
+            draw,
+            part["x"],
+            part["y"],
+            part["z"],
+            part["dx"],
+            part["dy"],
+            part["dz"],
+            part["fill"],
+            part["outline"],
+            offset_x,
+            offset_y,
+            scale,
+            pallet_line,
+        )
+
+    # Build lookup sets for top-face culling.
+    layer_keys = [
+        {
+            iso25_placement_key(p)
+            for p in layer_positions
+        }
+        for layer_positions in scene["layers"]
+    ]
+
+    carton_colors = {
+        # Deliberately subtle rotation difference — presentation, not debug mode.
+        "A": "#D99A2C",
+        "B": "#D18D22",
+    }
+
+    carton_line = max(
+        1.2,
+        preset["line"] * 0.40,
+    )
+
+    carton_items = []
+
+    for layer_idx, layer_positions in enumerate(scene["layers"]):
+        for p in layer_positions:
+            carton_items.append(
+                (
+                    layer_idx,
+                    p,
+                    layer_positions,
+                )
+            )
+
+    # Back rows first, bottom layers before upper layers, left cartons before right.
+    carton_items.sort(
+        key=lambda item: (
+            -item[1]["y"],
+            item[0],
+            item[1]["x"],
+        )
+    )
+
+    for layer_idx, p, layer_positions in carton_items:
+        z = (
+            pallet_h
+            + layer_idx * box_vertical_h
+        )
+
+        has_above = False
+
+        if layer_idx + 1 < len(layer_keys):
+            has_above = (
+                iso25_placement_key(p)
+                in layer_keys[layer_idx + 1]
+            )
+
+        right_hidden = iso25_has_right_neighbor(
+            p,
+            layer_positions,
+        )
+
+        draw_iso25_prism(
+            draw,
+            p["x"],
+            p["y"],
+            z,
+            p["w"],
+            p["l"],
+            box_vertical_h,
+            carton_colors.get(
+                p.get("ROT", "A"),
+                "#D59528",
+            ),
+            "#5C4020",
+            offset_x,
+            offset_y,
+            scale,
+            carton_line,
+            show_front=True,
+            show_right=not right_hidden,
+            show_top=not has_above,
+        )
+
+    if include_footer and not clean_mode:
+        footer_1, footer_2 = export_footer_lines(
+            scenario,
+            layout,
+            carton_count,
+        )
+
+        line_y = canvas_h - footer_h
+
+        draw.line(
+            (
+                margin_x,
+                line_y,
+                canvas_w - margin_x,
+                line_y,
+            ),
+            fill="#CBD5E1",
+            width=2,
+        )
+
+        draw.text(
+            (
+                margin_x,
+                line_y + preset["small"] * 0.85,
+            ),
+            footer_1,
+            font=small_font,
+            fill="#334155",
+        )
+
+        draw.text(
+            (
+                margin_x,
+                line_y + preset["small"] * 2.35,
+            ),
+            footer_2,
+            font=small_font,
+            fill="#334155",
+        )
+
+        pil_text_right(
+            draw,
+            (
+                canvas_w - margin_x,
+                line_y + preset["small"] * 2.35,
+            ),
+            "Fixed 2.5D engineering illustration",
+            small_font,
+            "#64748b",
+        )
+
     output = io.BytesIO()
-    image.save(output, format="PNG", optimize=True)
+
+    image.save(
+        output,
+        format="PNG",
+        optimize=True,
+    )
+
     return output.getvalue()
 
 
@@ -5166,12 +5396,6 @@ def export_signature(
             pallet_tare_weight,
             3,
         ),
-        bool(
-            show_corner_guards
-        ),
-        bool(
-            show_straps
-        ),
         placement_sig,
     )
 
@@ -5233,13 +5457,14 @@ def prepare_export_bundle(
             )
         ),
         "elevation_svg": elevation_svg,
-        "pro3d_png": (
-            generate_professional_3d_png(
+        "iso25d_png": (
+            generate_professional_25d_png(
                 scenario,
                 layout,
                 carton_count,
                 preset_name,
                 include_footer,
+                clean_mode=False,
             )
         ),
     }
@@ -5256,7 +5481,7 @@ def render_export_center(
         expanded=False,
     ):
         st.caption(
-            "V0.3B สร้างไฟล์เฉพาะเมื่อกด Prepare Export Files "
+            "V0.3C.1 สร้างไฟล์เฉพาะเมื่อกด Prepare Export Files "
             "เพื่อไม่ให้การปรับ Input และ Visualization ช้าลง"
         )
 
@@ -5315,7 +5540,7 @@ def render_export_center(
             f"PNG canvas: "
             f"{preset['width']} × "
             f"{preset['height']} px • "
-            "SVG remains vector-scalable • "
+            "Layer / Elevation SVG remains vector-scalable • Professional 2.5D = PNG in C.1 • "
             "Export typography is intentionally larger than on-screen UI"
         )
 
@@ -5508,14 +5733,14 @@ def render_export_center(
                     )
 
                 st.markdown("---")
-                st.markdown("**Professional 3D Render (PNG)**")
+                st.markdown("**Professional 2.5D Packaging Illustration (PNG)**")
                 st.caption(
-                    "ใช้มุมมอง isometric แบบคงที่เพื่อให้ภาพอ่านง่ายขึ้นใน WI / PPT / Shipping spec "
-                    "และไม่ผูกกับมุมหมุนของ Lightweight 3D"
+                    "Fixed 2.5D illustration ที่วาดเฉพาะ Top / Front / Right visible faces "
+                    "และใช้ Solver placements โดยตรง — ไม่มี rear-face / WebGL depth artifacts"
                 )
 
-                pro3d_name = build_export_filename(
-                    "Professional3DRender",
+                iso25d_name = build_export_filename(
+                    "Professional2_5D",
                     scenario,
                     layout,
                     carton_count,
@@ -5523,26 +5748,26 @@ def render_export_center(
                 )
 
                 st.download_button(
-                    "⬇️ PNG — Professional 3D Render",
-                    data=bundle["pro3d_png"],
-                    file_name=pro3d_name,
+                    "⬇️ PNG — Professional 2.5D",
+                    data=bundle["iso25d_png"],
+                    file_name=iso25d_name,
                     mime="image/png",
                     use_container_width=True,
                     key=(
                         f"{key_prefix}"
-                        "_download_pro3d_png"
+                        "_download_iso25d_png"
                     ),
                 )
 
                 st.image(
-                    bundle["pro3d_png"],
-                    caption="Professional 3D render preview",
+                    bundle["iso25d_png"],
+                    caption="Professional 2.5D export preview",
                     use_container_width=True,
                 )
 
         st.info(
-            "✅ V0.3B เพิ่ม Professional 3D Render Export แล้ว โดยยังคง Lightweight 3D ไว้สำหรับ interactive review "
-            "เพื่อรักษาความเร็วของ App"
+            "✅ V0.3C.1 Professional Export เปลี่ยนเป็น Fixed 2.5D Isometric Renderer แล้ว • "
+            "รอบนี้จงใจแสดงเฉพาะ Cartons + Pallet เพื่อ validate renderer foundation ก่อนเพิ่ม Strap / Corner Guard ใน C.2"
         )
 
 # =========================================================
@@ -5841,6 +6066,7 @@ def render_scenario(
         [
             "🔝 Smart Layer Pattern",
             "📐 Engineering Elevation",
+            "📦 Professional 2.5D",
             "🧊 Lightweight 3D",
         ],
         index=0,
@@ -5889,10 +6115,40 @@ def render_scenario(
                 "อยู่ใกล้กึ่งกลางพาเลท"
             )
 
+    elif visualization == "📦 Professional 2.5D":
+        st.caption(
+            "Fixed Front-Right 2.5D • Cartons + Pallet only in V0.3C.1 • "
+            "วาดจาก Solver placements โดยตรงและไม่สร้าง rear faces"
+        )
+
+        preview_png = generate_professional_25d_png(
+            scenario,
+            display_layout,
+            display_count,
+            "Document Small",
+            include_footer=False,
+            clean_mode=True,
+        )
+
+        st.image(
+            preview_png,
+            caption=(
+                f"2.5D Preview • {display_count} cartons • "
+                f"{display_layout['STRATEGY']} • "
+                f"{scenario['GROUP']['UP_AXIS']}-Up"
+            ),
+            use_container_width=True,
+        )
+
+        st.caption(
+            "V0.3C.1 intentionally ยังไม่ใส่ Strap / Corner Guard / Height Plane ใน 2.5D "
+            "เพื่อพิสูจน์ Carton + Pallet geometry และ occlusion ให้ผ่านก่อน"
+        )
+
     else:
         st.caption(
-            "Orthographic industrial view • Kraft cartons + dark carton edges + red straps • "
-            "3D จะถูกสร้างเฉพาะเมื่อเลือก View นี้เพื่อลดเวลา rerun"
+            "Interactive engineering preview • Plotly Lightweight 3D ยังเก็บไว้สำหรับหมุนตรวจ geometry เท่านั้น • "
+            "Professional document export ใช้ 2.5D แทน"
         )
 
         fig = generate_plotly_3d(
@@ -5912,8 +6168,7 @@ def render_scenario(
             )
 
         st.caption(
-            "Corner Guards / Straps เป็น 3D illustration เพื่อช่วยสื่อสารเท่านั้น "
-            "ไม่ใช่ Packaging requirement recommendation"
+            "Lightweight 3D เป็น interactive review เท่านั้น ไม่ใช้เป็น Professional Export"
         )
 
     render_export_center(
@@ -5997,7 +6252,7 @@ total_layouts = sum(
 )
 
 st.caption(
-    f"V0.3B evaluated {total_layouts} unique floor layouts "
+    f"V0.3C.1 evaluated {total_layouts} unique floor layouts "
     "from Simple Grid, Mixed Rows, Mixed Columns"
     + (
         ", Residual L-Fill"
@@ -6424,7 +6679,7 @@ with st.expander(
 ):
     st.markdown(
         """
-        **V0.3B Professional 3D Export**
+        **V0.3C.1 Professional 2.5D Renderer**
 
         - **Smart Floor Solver ใช้ Logic เดิมจาก V0.2** และยังประเมิน Floor Pattern หลาย Strategy ภายใน Up Orientation เดียวกัน:
           **Simple Grid, Mixed Rows, Mixed Columns และ Residual L-Fill**.
@@ -6449,9 +6704,11 @@ with st.expander(
         - PNG มี Output Preset และ Typography ที่ออกแบบให้ยังอ่านได้เมื่อวางใน Word / PowerPoint / WI.
         - Export files จะสร้างเฉพาะเมื่อผู้ใช้กด **Prepare Export Files** เพื่อลด rerun cost.
         - Engineering Elevation Export เลือกได้ Front + Side, Front Only หรือ Side Only.
-        - เพิ่ม **Professional 3D Render Export (PNG)** สำหรับเอกสาร WI / Packing spec / Customer alignment.
-        - Professional 3D Render ใช้มุมมอง isometric แบบคงที่ ไม่อิงมุมหมุนของ Plotly 3D.
-        - ใช้สี carton / strap / corner guard ที่แยกกันชัดเจน เพื่ออ่าน layout ได้ง่ายกว่า Lightweight 3D.
+        - ถอด Professional pseudo-3D export เดิมออก และแทนด้วย **Fixed Professional 2.5D Renderer (PNG)**.
+        - 2.5D วาดเฉพาะ visible Top / Front / Right faces จึงไม่เกิด rear-face / hidden-surface artifacts แบบเดิม.
+        - Carton position และ Partial Top Layer ใช้ Solver placements / `build_display_stack()` โดยตรง.
+        - V0.3C.1 จงใจ render เฉพาะ **Cartons + Pallet**; Strap / Corner Guard / Top Edge Guard จะพิจารณาใน V0.3C.2 หลัง foundation ผ่าน validation.
+        - Lightweight 3D ยังคงไว้สำหรับ interactive review เท่านั้น ไม่ใช้เป็น Professional Document Export.
         - Lightweight 3D รวม carton meshes / edges เป็น grouped traces, ใช้ orthographic camera และ render เฉพาะเมื่อผู้ใช้เลือก 3D View.
         - 3D Corner Guards / Straps เป็น **Illustration only** ไม่ใช่ระบบคำนวณหรือ Recommendation.
         - V0.2 ยังไม่พิจารณา Compression Strength, Box Stacking Strength,
