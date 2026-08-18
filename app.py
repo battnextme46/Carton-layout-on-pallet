@@ -12,7 +12,7 @@ import streamlit as st
 # =========================================================
 # PAGE CONFIG
 # =========================================================
-APP_VERSION = "V0.3C.1.1"
+APP_VERSION = "V0.3C.3.1"
 MODULE_NAME = "Module 02 — Carton Palletizing Optimizer"
 EPS = 1e-9
 MAX_EXHAUSTIVE_PARTIAL_COMBINATIONS = 50000
@@ -77,7 +77,7 @@ st.markdown(
 st.title("📦 Carton Palletizing Layout Optimizer")
 st.caption(
     f"{APP_VERSION} • NPI Packaging Engineering Toolkit • {MODULE_NAME} "
-    "— Professional 2.5D Export Engine + Strap / Corner / Top Edge Guard Layer + Document-ready Export + True-scale Engineering View"
+    "— Professional 2.5D Export Engine + Strap / Corner / Top Edge Guard Layer + Top Edge Guard Geometry Fix + Document-ready Export + True-scale Engineering View"
 )
 
 
@@ -242,7 +242,7 @@ prefer_simple_on_safe_tie = st.sidebar.checkbox(
 )
 
 st.sidebar.caption(
-    "V0.3C.3 ใช้ Smart Floor Solver เดิมและต่อยอด Professional Export เป็น Fixed Isometric 2.5D Renderer "
+    "V0.3C.3.1 ใช้ Smart Floor Solver เดิมและปรับ Professional 2.5D Top Edge Guard เป็น continuous rigid L-profile "
     "โดยการหมุนกล่องบนพื้น 90° ยังไม่ถือว่าเป็นการเปลี่ยน H-Up / L-Up / W-Up"
 )
 
@@ -2558,9 +2558,9 @@ def generate_plotly_3d(
 
 
 # =========================================================
-# PROFESSIONAL 2.5D RENDERER — V0.3C.1
+# PROFESSIONAL 2.5D RENDERER — V0.3C.3.1
 # Stable fixed-view oblique/isometric-style illustration.
-# C.1 intentionally contains only Cartons + Pallet.
+# Includes Cartons + Pallet + Strap + Corner / Top Edge Guard layers.
 # =========================================================
 def hex_to_rgb(value):
     value = str(value).strip().lstrip("#")
@@ -2948,36 +2948,105 @@ def draw_iso25_accessories(
 
     line_width = max(1.0, preset_line * 0.36)
 
+    # ---------------------------------------------------------
+    # Visual materials
+    # ---------------------------------------------------------
     guard_fill = "#D9DDE3"
     guard_outline = "#8B96A3"
-    guard_w = max(14.0, min(24.0, min(used_w, used_l) * 0.018))
-    guard_t = max(4.0, guard_w * 0.22)
-    top_guard_t = max(7.0, guard_t * 1.45)
-    top_guard_reach = max(guard_w * 1.2, 28.0)
 
     strap_fill = "#173B72"
     strap_outline = "#0F2850"
-    strap_w = max(16.0, min(26.0, min(used_w, used_l) * 0.020))
-    strap_t = max(3.0, strap_w * 0.18)
-    anchor_z0 = max(0.0, top_deck_bottom_z)
 
-    # Keep strap positions slightly inset from the carton edges for a cleaner,
-    # more realistic look.
+    # ---------------------------------------------------------
+    # Guard sizing — V0.3C.3.1
+    # Larger wings / legs so the guard visibly wraps the corner.
+    # ---------------------------------------------------------
+    guard_face = max(
+        20.0,
+        min(
+            34.0,
+            min(used_w, used_l) * 0.024,
+        ),
+    )
+
+    guard_wall = max(
+        5.0,
+        min(
+            10.0,
+            guard_face * 0.28,
+        ),
+    )
+
+    # Top edge guard = continuous rigid L-profile.
+    top_guard_reach = max(
+        28.0,
+        min(
+            46.0,
+            min(used_w, used_l) * 0.032,
+        ),
+    )
+
+    top_guard_t = max(
+        7.0,
+        min(
+            13.0,
+            top_guard_reach * 0.26,
+        ),
+    )
+
+    top_guard_drop = max(
+        24.0,
+        min(
+            44.0,
+            top_guard_reach * 0.95,
+        ),
+    )
+
+    # ---------------------------------------------------------
+    # Strap sizing
+    # ---------------------------------------------------------
+    strap_w = max(
+        16.0,
+        min(
+            26.0,
+            min(used_w, used_l) * 0.020,
+        ),
+    )
+
+    strap_t = max(
+        3.0,
+        strap_w * 0.18,
+    )
+
+    # Strap wraps around the underside of the TOP DECK only.
+    # This leaves the forklift entry / bottom pallet structure clear.
+    anchor_z0 = max(
+        0.0,
+        top_deck_bottom_z,
+    )
+
     x_positions = [
         min_x + used_w * 0.28,
         min_x + used_w * 0.72,
     ]
+
     y_positions = [
         min_y + used_l * 0.32,
         min_y + used_l * 0.68,
     ]
 
+    # =========================================================
+    # CORNER GUARD + TOP EDGE GUARD
+    # =========================================================
     if show_corner_guards:
-        # Vertical corner guards only on visible edges of the fixed front-right view.
+        # -----------------------------------------------------
+        # Vertical corner guards — visible corners only.
+        # The wider face improves the visual wrap around carton edges.
+        # -----------------------------------------------------
         vertical_guards = [
             (min_x, min_y),
-            (max_x - guard_w, min_y),
-            (max_x - guard_w, max_y - guard_t),
+            (max_x - guard_face, min_y),
+            (max_x - guard_face, max_y - guard_wall),
         ]
 
         for gx, gy in vertical_guards:
@@ -2986,8 +3055,8 @@ def draw_iso25_accessories(
                 gx,
                 gy,
                 pallet_h,
-                guard_w,
-                guard_t,
+                guard_face,
+                guard_wall,
                 cargo_top_z - pallet_h,
                 guard_fill,
                 guard_outline,
@@ -3000,50 +3069,105 @@ def draw_iso25_accessories(
                 show_top=False,
             )
 
-        # Top edge guard pieces: rigid L/U-like protectors only where straps sit,
-        # not a full top sheet.
-        for sx in x_positions:
-            draw_iso25_prism(
-                draw,
-                sx - (strap_w * 0.72),
-                min_y,
-                cargo_top_z,
-                strap_w * 1.44,
-                top_guard_reach,
-                top_guard_t,
-                guard_fill,
-                guard_outline,
-                offset_x,
-                offset_y,
-                scale,
-                line_width,
-                show_front=True,
-                show_right=True,
-                show_top=True,
-            )
+        # -----------------------------------------------------
+        # TOP FRONT EDGE GUARD — continuous rigid L-profile
+        # Top flange
+        # -----------------------------------------------------
+        draw_iso25_prism(
+            draw,
+            min_x,
+            min_y,
+            cargo_top_z,
+            used_w,
+            top_guard_reach,
+            top_guard_t,
+            guard_fill,
+            guard_outline,
+            offset_x,
+            offset_y,
+            scale,
+            line_width,
+            show_front=True,
+            show_right=False,
+            show_top=True,
+        )
 
-        for sy in y_positions:
-            draw_iso25_prism(
-                draw,
-                max_x - top_guard_reach,
-                sy - (strap_w * 0.72),
-                cargo_top_z,
-                top_guard_reach,
-                strap_w * 1.44,
-                top_guard_t,
-                guard_fill,
-                guard_outline,
-                offset_x,
-                offset_y,
-                scale,
-                line_width,
-                show_front=True,
-                show_right=True,
-                show_top=True,
-            )
+        # Downward/front flange
+        draw_iso25_prism(
+            draw,
+            min_x,
+            min_y,
+            cargo_top_z - top_guard_drop,
+            used_w,
+            guard_wall,
+            top_guard_drop,
+            guard_fill,
+            guard_outline,
+            offset_x,
+            offset_y,
+            scale,
+            line_width,
+            show_front=True,
+            show_right=False,
+            show_top=False,
+        )
 
+        # -----------------------------------------------------
+        # TOP RIGHT EDGE GUARD — continuous rigid L-profile
+        # Top flange
+        # -----------------------------------------------------
+        draw_iso25_prism(
+            draw,
+            max_x - top_guard_reach,
+            min_y,
+            cargo_top_z,
+            top_guard_reach,
+            used_l,
+            top_guard_t,
+            guard_fill,
+            guard_outline,
+            offset_x,
+            offset_y,
+            scale,
+            line_width,
+            show_front=False,
+            show_right=True,
+            show_top=True,
+        )
+
+        # Downward/right flange
+        draw_iso25_prism(
+            draw,
+            max_x - guard_wall,
+            min_y,
+            cargo_top_z - top_guard_drop,
+            guard_wall,
+            used_l,
+            top_guard_drop,
+            guard_fill,
+            guard_outline,
+            offset_x,
+            offset_y,
+            scale,
+            line_width,
+            show_front=False,
+            show_right=True,
+            show_top=False,
+        )
+
+    # =========================================================
+    # STRAPS
+    # =========================================================
     if show_straps:
-        # Front visible strap legs wrap under the TOP DECK, not the lower pallet board.
+        top_z = (
+            cargo_top_z + top_guard_t
+            if show_corner_guards
+            else cargo_top_z
+        )
+
+        # -----------------------------------------------------
+        # Front visible vertical straps
+        # -----------------------------------------------------
         for sx in x_positions:
             draw_iso25_prism(
                 draw,
@@ -3064,14 +3188,17 @@ def draw_iso25_accessories(
                 show_top=False,
             )
 
-            # Visible short wrap under the top deck front edge.
+            # Small visible return under the top deck front edge.
             draw_iso25_prism(
                 draw,
                 sx - strap_w / 2.0,
                 min_y,
                 anchor_z0,
                 strap_w,
-                top_guard_reach * 0.55,
+                max(
+                    top_guard_reach * 0.55,
+                    strap_t,
+                ),
                 strap_t,
                 strap_fill,
                 strap_outline,
@@ -3084,11 +3211,12 @@ def draw_iso25_accessories(
                 show_top=True,
             )
 
+            # Strap travels over the top guard.
             draw_iso25_top_strip(
                 draw,
                 sx - strap_w / 2.0,
                 min_y,
-                cargo_top_z + (top_guard_t if show_corner_guards else 0.0),
+                top_z,
                 strap_w,
                 used_l,
                 strap_t,
@@ -3100,8 +3228,10 @@ def draw_iso25_accessories(
                 line_width,
             )
 
+        # -----------------------------------------------------
+        # Right visible vertical straps
+        # -----------------------------------------------------
         for sy in y_positions:
-            # Right visible strap leg.
             draw_iso25_prism(
                 draw,
                 max_x - strap_t,
@@ -3121,13 +3251,19 @@ def draw_iso25_accessories(
                 show_top=False,
             )
 
-            # Visible short wrap under the top deck right edge.
+            # Small visible return under the top deck right edge.
             draw_iso25_prism(
                 draw,
-                max_x - max(top_guard_reach * 0.55, strap_t),
+                max_x - max(
+                    top_guard_reach * 0.55,
+                    strap_t,
+                ),
                 sy - strap_w / 2.0,
                 anchor_z0,
-                max(top_guard_reach * 0.55, strap_t),
+                max(
+                    top_guard_reach * 0.55,
+                    strap_t,
+                ),
                 strap_w,
                 strap_t,
                 strap_fill,
@@ -3141,11 +3277,12 @@ def draw_iso25_accessories(
                 show_top=True,
             )
 
+            # Strap travels over the top guard.
             draw_iso25_prism(
                 draw,
                 min_x,
                 sy - strap_w / 2.0,
-                cargo_top_z + (top_guard_t if show_corner_guards else 0.0),
+                top_z,
                 used_w,
                 strap_w,
                 strap_t,
@@ -5816,7 +5953,7 @@ def render_export_center(
         expanded=False,
     ):
         st.caption(
-            "V0.3C.3 สร้างไฟล์เฉพาะเมื่อกด Prepare Export Files "
+            "V0.3C.3.1 สร้างไฟล์เฉพาะเมื่อกด Prepare Export Files "
             "เพื่อไม่ให้การปรับ Input และ Visualization ช้าลง"
         )
 
@@ -6102,7 +6239,7 @@ def render_export_center(
 
         st.info(
             "✅ V0.3C.1 Professional Export เปลี่ยนเป็น Fixed 2.5D Isometric Renderer แล้ว • "
-            "V0.3C.3 แสดง Cartons + Pallet + Strap + Corner / Top Edge Guard แบบ fixed 2.5D สำหรับงาน reference/export"
+            "V0.3C.3.1 แสดง Cartons + Pallet + Strap + Corner / Top Edge Guard แบบ fixed 2.5D โดย Top Edge Guard ใช้ continuous L-profile"
         )
 
 # =========================================================
@@ -6476,7 +6613,7 @@ def render_scenario(
         )
 
         st.caption(
-            "V0.3C.3 เพิ่ม Strap / Corner / Top Edge Guard ใน 2.5D แล้ว โดยยังคงไม่ใช้ Height Plane ในภาพ 2.5D "
+            "V0.3C.3.1 ปรับ Top Edge Guard ให้เป็น continuous L-profile ปีกใหญ่ขึ้น และยังคงไม่ใช้ Height Plane ในภาพ 2.5D "
             "เพื่อพิสูจน์ Carton + Pallet geometry และ occlusion ให้ผ่านก่อน"
         )
 
@@ -7014,7 +7151,7 @@ with st.expander(
 ):
     st.markdown(
         """
-        **V0.3C.3 Professional 2.5D Renderer**
+        **V0.3C.3.1 Professional 2.5D Renderer — Top Edge Guard Geometry Fix**
 
         - **Smart Floor Solver ใช้ Logic เดิมจาก V0.2** และยังประเมิน Floor Pattern หลาย Strategy ภายใน Up Orientation เดียวกัน:
           **Simple Grid, Mixed Rows, Mixed Columns และ Residual L-Fill**.
@@ -7042,7 +7179,7 @@ with st.expander(
         - ต่อยอด Fixed Professional 2.5D Renderer (PNG) ด้วย **Strap / Corner / Top Edge Guard Layer แบบ visible-face only**.
         - 2.5D วาดเฉพาะ visible Top / Front / Right faces จึงไม่เกิด rear-face / hidden-surface artifacts แบบเดิม.
         - Carton position และ Partial Top Layer ใช้ Solver placements / `build_display_stack()` โดยตรง.
-        - V0.3C.1 จงใจ render เฉพาะ **Cartons + Pallet**; Strap / Corner / Top Edge Guard จะพิจารณาใน V0.3C.3 หลัง foundation ผ่าน validation.
+        - V0.3C.3.1 ใช้ **Cartons + Pallet + Strap + Corner / Top Edge Guard** ใน fixed 2.5D และปรับ Top Edge Guard เป็น continuous L-profile เพื่อให้ใกล้ลักษณะชิ้นงานจริงมากขึ้น.
         - Lightweight 3D ยังคงไว้สำหรับ interactive review เท่านั้น ไม่ใช้เป็น Professional Document Export.
         - Lightweight 3D รวม carton meshes / edges เป็น grouped traces, ใช้ orthographic camera และ render เฉพาะเมื่อผู้ใช้เลือก 3D View.
         - 3D Corner / Top Edge Guards / Straps เป็น **Illustration only** ไม่ใช่ระบบคำนวณหรือ Recommendation.
