@@ -77,7 +77,7 @@ st.markdown(
 st.title("📦 Carton Palletizing Layout Optimizer")
 st.caption(
     f"{APP_VERSION} • NPI Packaging Engineering Toolkit • {MODULE_NAME} "
-    "— Core Professional 2.5D Isometric Renderer + Document-ready Export + True-scale Engineering View"
+    "— Professional 2.5D Export Engine + Strap / Corner Guard Layer + Document-ready Export + True-scale Engineering View"
 )
 
 
@@ -2851,6 +2851,241 @@ def iso25_scene_bounds(layout, carton_count, box_vertical_h):
     }
 
 
+
+
+def get_iso25_stack_bounds(layout):
+    if not layout.get("PLACEMENTS"):
+        return None
+
+    bounds = placement_bounds(layout["PLACEMENTS"])
+    return {
+        "min_x": bounds["MIN_X"],
+        "min_y": bounds["MIN_Y"],
+        "max_x": bounds["MAX_X"],
+        "max_y": bounds["MAX_Y"],
+        "used_w": bounds["MAX_X"] - bounds["MIN_X"],
+        "used_l": bounds["MAX_Y"] - bounds["MIN_Y"],
+    }
+
+
+def draw_iso25_top_strip(
+    draw,
+    x,
+    y,
+    z,
+    dx,
+    dy,
+    thickness,
+    fill,
+    outline,
+    offset_x,
+    offset_y,
+    scale,
+    line_width,
+):
+    draw_iso25_prism(
+        draw,
+        x,
+        y,
+        z,
+        dx,
+        dy,
+        thickness,
+        fill,
+        outline,
+        offset_x,
+        offset_y,
+        scale,
+        line_width,
+        show_front=False,
+        show_right=False,
+        show_top=True,
+    )
+
+
+def draw_iso25_accessories(
+    draw,
+    layout,
+    cargo_top_z,
+    offset_x,
+    offset_y,
+    scale,
+    preset_line,
+):
+    bounds = get_iso25_stack_bounds(layout)
+    if not bounds or cargo_top_z <= pallet_h:
+        return
+
+    min_x = bounds["min_x"]
+    min_y = bounds["min_y"]
+    max_x = bounds["max_x"]
+    max_y = bounds["max_y"]
+    used_w = max(bounds["used_w"], 1.0)
+    used_l = max(bounds["used_l"], 1.0)
+
+    line_width = max(1.0, preset_line * 0.36)
+
+    guard_fill = "#D6D9DE"
+    guard_outline = "#7B8794"
+    guard_w = max(14.0, min(24.0, min(used_w, used_l) * 0.018))
+    guard_t = max(4.0, guard_w * 0.22)
+    top_guard_t = max(5.0, guard_t * 1.1)
+
+    strap_fill = "#173B72"
+    strap_outline = "#0F2850"
+    strap_w = max(16.0, min(26.0, min(used_w, used_l) * 0.020))
+    strap_t = max(3.0, strap_w * 0.18)
+    anchor_z0 = 0.0
+
+    if show_corner_guards:
+        # Visible vertical corner guards only for the fixed front-right view.
+        vertical_guards = [
+            (min_x, min_y),
+            (max_x - guard_w, min_y),
+            (max_x - guard_w, max_y - guard_t),
+        ]
+
+        for gx, gy in vertical_guards:
+            draw_iso25_prism(
+                draw,
+                gx,
+                gy,
+                pallet_h,
+                guard_w,
+                guard_t,
+                cargo_top_z - pallet_h,
+                guard_fill,
+                guard_outline,
+                offset_x,
+                offset_y,
+                scale,
+                line_width,
+                show_front=True,
+                show_right=True,
+                show_top=False,
+            )
+
+        # Top edge guards on visible front and right edges.
+        draw_iso25_top_strip(
+            draw,
+            min_x,
+            min_y,
+            cargo_top_z,
+            used_w,
+            guard_t,
+            top_guard_t,
+            guard_fill,
+            guard_outline,
+            offset_x,
+            offset_y,
+            scale,
+            line_width,
+        )
+
+        draw_iso25_prism(
+            draw,
+            max_x - guard_t,
+            min_y,
+            cargo_top_z,
+            guard_t,
+            used_l,
+            top_guard_t,
+            guard_fill,
+            guard_outline,
+            offset_x,
+            offset_y,
+            scale,
+            line_width,
+            show_front=False,
+            show_right=True,
+            show_top=True,
+        )
+
+    if show_straps:
+        x_positions = [
+            min_x + used_w * 0.28,
+            min_x + used_w * 0.72,
+        ]
+        y_positions = [
+            min_y + used_l * 0.32,
+            min_y + used_l * 0.68,
+        ]
+
+        for sx in x_positions:
+            draw_iso25_prism(
+                draw,
+                sx - strap_w / 2.0,
+                min_y,
+                anchor_z0,
+                strap_w,
+                strap_t,
+                cargo_top_z - anchor_z0,
+                strap_fill,
+                strap_outline,
+                offset_x,
+                offset_y,
+                scale,
+                line_width,
+                show_front=True,
+                show_right=False,
+                show_top=False,
+            )
+
+            draw_iso25_top_strip(
+                draw,
+                sx - strap_w / 2.0,
+                min_y,
+                cargo_top_z,
+                strap_w,
+                used_l,
+                strap_t,
+                strap_fill,
+                strap_outline,
+                offset_x,
+                offset_y,
+                scale,
+                line_width,
+            )
+
+        for sy in y_positions:
+            draw_iso25_prism(
+                draw,
+                max_x - strap_t,
+                sy - strap_w / 2.0,
+                anchor_z0,
+                strap_t,
+                strap_w,
+                cargo_top_z - anchor_z0,
+                strap_fill,
+                strap_outline,
+                offset_x,
+                offset_y,
+                scale,
+                line_width,
+                show_front=False,
+                show_right=True,
+                show_top=False,
+            )
+
+            draw_iso25_prism(
+                draw,
+                min_x,
+                sy - strap_w / 2.0,
+                cargo_top_z,
+                used_w,
+                strap_w,
+                strap_t,
+                strap_fill,
+                strap_outline,
+                offset_x,
+                offset_y,
+                scale,
+                line_width,
+                show_front=False,
+                show_right=False,
+                show_top=True,
+            )
+
 def generate_professional_25d_png(
     scenario,
     layout,
@@ -2915,10 +3150,18 @@ def generate_professional_25d_png(
             "#111827",
         )
 
+        accessory_flags = []
+        if show_straps:
+            accessory_flags.append("Strap")
+        if show_corner_guards:
+            accessory_flags.append("Corner Guard")
+        acc_text = " + ".join(accessory_flags) if accessory_flags else "Carton + Pallet"
+
         subtitle = (
             f"{carton_count} cartons | "
             f"{layout['STRATEGY']} | "
-            f"{scenario['GROUP']['UP_AXIS']}-Up"
+            f"{scenario['GROUP']['UP_AXIS']}-Up | "
+            f"{acc_text}"
         )
 
         pil_text_center(
@@ -2968,7 +3211,6 @@ def generate_professional_25d_png(
         - scene["min_py"] * scale
     )
 
-    # Ground shadow.
     shadow_world = [
         (-25.0, -20.0, 0.0),
         (pallet_w + 45.0, -20.0, 0.0),
@@ -2988,7 +3230,6 @@ def generate_professional_25d_png(
         fill="#E7EAEE",
     )
 
-    # Pallet first — complete and independent from carton ordering.
     pallet_line = max(
         1.4,
         preset["line"] * 0.48,
@@ -3011,7 +3252,6 @@ def generate_professional_25d_png(
             pallet_line,
         )
 
-    # Build lookup sets for top-face culling.
     layer_keys = [
         {
             iso25_placement_key(p)
@@ -3021,7 +3261,6 @@ def generate_professional_25d_png(
     ]
 
     carton_colors = {
-        # Deliberately subtle rotation difference — presentation, not debug mode.
         "A": "#D99A2C",
         "B": "#D18D22",
     }
@@ -3043,7 +3282,6 @@ def generate_professional_25d_png(
                 )
             )
 
-    # Back rows first, bottom layers before upper layers, left cartons before right.
     carton_items.sort(
         key=lambda item: (
             -item[1]["y"],
@@ -3093,6 +3331,22 @@ def generate_professional_25d_png(
             show_top=not has_above,
         )
 
+    cargo_top_z = (
+        pallet_h + len(scene["layers"]) * box_vertical_h
+        if scene["layers"]
+        else pallet_h
+    )
+
+    draw_iso25_accessories(
+        draw,
+        layout,
+        cargo_top_z,
+        offset_x,
+        offset_y,
+        scale,
+        preset["line"],
+    )
+
     if include_footer and not clean_mode:
         footer_1, footer_2 = export_footer_lines(
             scenario,
@@ -3133,13 +3387,20 @@ def generate_professional_25d_png(
             fill="#334155",
         )
 
+        footer_right = []
+        if show_straps:
+            footer_right.append("strap")
+        if show_corner_guards:
+            footer_right.append("corner guard")
+        suffix = " + ".join(footer_right) if footer_right else "carton / pallet"
+
         pil_text_right(
             draw,
             (
                 canvas_w - margin_x,
                 line_y + preset["small"] * 2.35,
             ),
-            "Fixed 2.5D engineering illustration",
+            f"Fixed 2.5D engineering illustration • {suffix}",
             small_font,
             "#64748b",
         )
@@ -5481,7 +5742,7 @@ def render_export_center(
         expanded=False,
     ):
         st.caption(
-            "V0.3C.1 สร้างไฟล์เฉพาะเมื่อกด Prepare Export Files "
+            "V0.3C.2 สร้างไฟล์เฉพาะเมื่อกด Prepare Export Files "
             "เพื่อไม่ให้การปรับ Input และ Visualization ช้าลง"
         )
 
@@ -5540,7 +5801,7 @@ def render_export_center(
             f"PNG canvas: "
             f"{preset['width']} × "
             f"{preset['height']} px • "
-            "Layer / Elevation SVG remains vector-scalable • Professional 2.5D = PNG in C.1 • "
+            "Layer / Elevation SVG remains vector-scalable • Professional 2.5D = PNG in C.2 • "
             "Export typography is intentionally larger than on-screen UI"
         )
 
@@ -6679,7 +6940,7 @@ with st.expander(
 ):
     st.markdown(
         """
-        **V0.3C.1 Professional 2.5D Renderer**
+        **V0.3C.2 Professional 2.5D Renderer**
 
         - **Smart Floor Solver ใช้ Logic เดิมจาก V0.2** และยังประเมิน Floor Pattern หลาย Strategy ภายใน Up Orientation เดียวกัน:
           **Simple Grid, Mixed Rows, Mixed Columns และ Residual L-Fill**.
@@ -6704,7 +6965,7 @@ with st.expander(
         - PNG มี Output Preset และ Typography ที่ออกแบบให้ยังอ่านได้เมื่อวางใน Word / PowerPoint / WI.
         - Export files จะสร้างเฉพาะเมื่อผู้ใช้กด **Prepare Export Files** เพื่อลด rerun cost.
         - Engineering Elevation Export เลือกได้ Front + Side, Front Only หรือ Side Only.
-        - ถอด Professional pseudo-3D export เดิมออก และแทนด้วย **Fixed Professional 2.5D Renderer (PNG)**.
+        - ต่อยอด Fixed Professional 2.5D Renderer (PNG) ด้วย **Strap / Corner Guard Layer แบบ visible-face only**.
         - 2.5D วาดเฉพาะ visible Top / Front / Right faces จึงไม่เกิด rear-face / hidden-surface artifacts แบบเดิม.
         - Carton position และ Partial Top Layer ใช้ Solver placements / `build_display_stack()` โดยตรง.
         - V0.3C.1 จงใจ render เฉพาะ **Cartons + Pallet**; Strap / Corner Guard / Top Edge Guard จะพิจารณาใน V0.3C.2 หลัง foundation ผ่าน validation.
