@@ -12,7 +12,7 @@ import streamlit as st
 # =========================================================
 # PAGE CONFIG
 # =========================================================
-APP_VERSION = "V0.3C.3.1"
+APP_VERSION = "V0.3C.3.2"
 MODULE_NAME = "Module 02 — Carton Palletizing Optimizer"
 EPS = 1e-9
 MAX_EXHAUSTIVE_PARTIAL_COMBINATIONS = 50000
@@ -77,7 +77,7 @@ st.markdown(
 st.title("📦 Carton Palletizing Layout Optimizer")
 st.caption(
     f"{APP_VERSION} • NPI Packaging Engineering Toolkit • {MODULE_NAME} "
-    "— Professional 2.5D Export Engine + Strap / Corner / Top Edge Guard Layer + Top Edge Guard Geometry Fix + Document-ready Export + True-scale Engineering View"
+    "— Professional 2.5D Export Engine + Strap / Corner / Top Edge Guard Layer + Top Edge Guard Geometry Fix + Cross Strap Layer + Document-ready Export + True-scale Engineering View"
 )
 
 
@@ -242,7 +242,7 @@ prefer_simple_on_safe_tie = st.sidebar.checkbox(
 )
 
 st.sidebar.caption(
-    "V0.3C.3.1 ใช้ Smart Floor Solver เดิมและปรับ Professional 2.5D Top Edge Guard เป็น continuous rigid L-profile "
+    "V0.3C.3.2 ใช้ Smart Floor Solver เดิมและปรับ Professional 2.5D Top Edge Guard เป็น continuous rigid L-profile "
     "โดยการหมุนกล่องบนพื้น 90° ยังไม่ถือว่าเป็นการเปลี่ยน H-Up / L-Up / W-Up"
 )
 
@@ -2558,7 +2558,7 @@ def generate_plotly_3d(
 
 
 # =========================================================
-# PROFESSIONAL 2.5D RENDERER — V0.3C.3.1
+# PROFESSIONAL 2.5D RENDERER — V0.3C.3.2
 # Stable fixed-view oblique/isometric-style illustration.
 # Includes Cartons + Pallet + Strap + Corner / Top Edge Guard layers.
 # =========================================================
@@ -2958,7 +2958,7 @@ def draw_iso25_accessories(
     strap_outline = "#0F2850"
 
     # ---------------------------------------------------------
-    # Guard sizing — V0.3C.3.1
+    # Guard sizing — V0.3C.3.2
     # Larger wings / legs so the guard visibly wraps the corner.
     # ---------------------------------------------------------
     guard_face = max(
@@ -3025,6 +3025,7 @@ def draw_iso25_accessories(
         top_deck_bottom_z,
     )
 
+    # Main loop-strap centerlines (vertical straps visible on front / right faces).
     x_positions = [
         min_x + used_w * 0.28,
         min_x + used_w * 0.72,
@@ -3033,6 +3034,21 @@ def draw_iso25_accessories(
     y_positions = [
         min_y + used_l * 0.32,
         min_y + used_l * 0.68,
+    ]
+
+    # Cross-strap centerlines shown on the top face only.
+    # These add the requested horizontal / transverse strap read without
+    # creating confusing hidden rear geometry on the side faces.
+    cross_x_positions = [
+        min_x + used_w * 0.18,
+        min_x + used_w * 0.50,
+        min_x + used_w * 0.82,
+    ]
+
+    cross_y_positions = [
+        min_y + used_l * 0.22,
+        min_y + used_l * 0.50,
+        min_y + used_l * 0.78,
     ]
 
     # =========================================================
@@ -3153,6 +3169,45 @@ def draw_iso25_accessories(
             show_front=False,
             show_right=True,
             show_top=False,
+        )
+
+        # -----------------------------------------------------
+        # COMPLETE VISIBLE TOP PERIMETER
+        # Add the top-only back and left members so the top edge guard reads
+        # as a continuous protective frame around the visible top outline.
+        # These are drawn as top faces only to avoid creating hidden rear/left
+        # vertical flanges in the fixed front-right 2.5D view.
+        # -----------------------------------------------------
+        draw_iso25_top_strip(
+            draw,
+            min_x,
+            max_y - top_guard_reach,
+            cargo_top_z,
+            used_w,
+            top_guard_reach,
+            top_guard_t,
+            guard_fill,
+            guard_outline,
+            offset_x,
+            offset_y,
+            scale,
+            line_width,
+        )
+
+        draw_iso25_top_strip(
+            draw,
+            min_x,
+            min_y,
+            cargo_top_z,
+            top_guard_reach,
+            used_l,
+            top_guard_t,
+            guard_fill,
+            guard_outline,
+            offset_x,
+            offset_y,
+            scale,
+            line_width,
         )
 
     # =========================================================
@@ -3295,6 +3350,47 @@ def draw_iso25_accessories(
                 show_front=False,
                 show_right=False,
                 show_top=True,
+            )
+
+        # -----------------------------------------------------
+        # Cross-strap layer on the visible TOP only
+        # Adds the requested horizontal / transverse strap read without
+        # introducing hidden rear-face clutter on side elevations.
+        # -----------------------------------------------------
+        cross_top_z = top_z + strap_t * 0.10
+
+        for cx in cross_x_positions:
+            draw_iso25_top_strip(
+                draw,
+                cx - strap_t / 2.0,
+                min_y,
+                cross_top_z,
+                strap_t,
+                used_l,
+                strap_t,
+                strap_fill,
+                strap_outline,
+                offset_x,
+                offset_y,
+                scale,
+                line_width,
+            )
+
+        for cy in cross_y_positions:
+            draw_iso25_top_strip(
+                draw,
+                min_x,
+                cy - strap_t / 2.0,
+                cross_top_z,
+                used_w,
+                strap_t,
+                strap_t,
+                strap_fill,
+                strap_outline,
+                offset_x,
+                offset_y,
+                scale,
+                line_width,
             )
 
 def generate_professional_25d_png(
@@ -5953,7 +6049,7 @@ def render_export_center(
         expanded=False,
     ):
         st.caption(
-            "V0.3C.3.1 สร้างไฟล์เฉพาะเมื่อกด Prepare Export Files "
+            "V0.3C.3.2 สร้างไฟล์เฉพาะเมื่อกด Prepare Export Files "
             "เพื่อไม่ให้การปรับ Input และ Visualization ช้าลง"
         )
 
@@ -6239,7 +6335,7 @@ def render_export_center(
 
         st.info(
             "✅ V0.3C.1 Professional Export เปลี่ยนเป็น Fixed 2.5D Isometric Renderer แล้ว • "
-            "V0.3C.3.1 แสดง Cartons + Pallet + Strap + Corner / Top Edge Guard แบบ fixed 2.5D โดย Top Edge Guard ใช้ continuous L-profile"
+            "V0.3C.3.2 แสดง Cartons + Pallet + Strap + Corner / Top Edge Guard แบบ fixed 2.5D โดย Top Edge Guard ใช้ continuous L-profile + full visible top perimeter and cross strap layer"
         )
 
 # =========================================================
@@ -6613,7 +6709,7 @@ def render_scenario(
         )
 
         st.caption(
-            "V0.3C.3.1 ปรับ Top Edge Guard ให้เป็น continuous L-profile ปีกใหญ่ขึ้น และยังคงไม่ใช้ Height Plane ในภาพ 2.5D "
+            "V0.3C.3.2 ปรับ Top Edge Guard ให้เป็น continuous L-profile ปีกใหญ่ขึ้น และยังคงไม่ใช้ Height Plane ในภาพ 2.5D "
             "เพื่อพิสูจน์ Carton + Pallet geometry และ occlusion ให้ผ่านก่อน"
         )
 
@@ -7151,7 +7247,7 @@ with st.expander(
 ):
     st.markdown(
         """
-        **V0.3C.3.1 Professional 2.5D Renderer — Top Edge Guard Geometry Fix**
+        **V0.3C.3.2 Professional 2.5D Renderer — Top Edge Guard Geometry Fix + Cross Strap Layer**
 
         - **Smart Floor Solver ใช้ Logic เดิมจาก V0.2** และยังประเมิน Floor Pattern หลาย Strategy ภายใน Up Orientation เดียวกัน:
           **Simple Grid, Mixed Rows, Mixed Columns และ Residual L-Fill**.
@@ -7179,7 +7275,7 @@ with st.expander(
         - ต่อยอด Fixed Professional 2.5D Renderer (PNG) ด้วย **Strap / Corner / Top Edge Guard Layer แบบ visible-face only**.
         - 2.5D วาดเฉพาะ visible Top / Front / Right faces จึงไม่เกิด rear-face / hidden-surface artifacts แบบเดิม.
         - Carton position และ Partial Top Layer ใช้ Solver placements / `build_display_stack()` โดยตรง.
-        - V0.3C.3.1 ใช้ **Cartons + Pallet + Strap + Corner / Top Edge Guard** ใน fixed 2.5D และปรับ Top Edge Guard เป็น continuous L-profile เพื่อให้ใกล้ลักษณะชิ้นงานจริงมากขึ้น.
+        - V0.3C.3.2 ใช้ **Cartons + Pallet + Strap + Corner / Top Edge Guard** ใน fixed 2.5D และปรับ Top Edge Guard เป็น continuous L-profile เพื่อให้ใกล้ลักษณะชิ้นงานจริงมากขึ้น.
         - Lightweight 3D ยังคงไว้สำหรับ interactive review เท่านั้น ไม่ใช้เป็น Professional Document Export.
         - Lightweight 3D รวม carton meshes / edges เป็น grouped traces, ใช้ orthographic camera และ render เฉพาะเมื่อผู้ใช้เลือก 3D View.
         - 3D Corner / Top Edge Guards / Straps เป็น **Illustration only** ไม่ใช่ระบบคำนวณหรือ Recommendation.
