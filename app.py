@@ -12,7 +12,7 @@ import streamlit as st
 # =========================================================
 # PAGE CONFIG
 # =========================================================
-APP_VERSION = "V0.3B"
+APP_VERSION = "V0.3B.1"
 MODULE_NAME = "Module 02 — Carton Palletizing Optimizer"
 EPS = 1e-9
 MAX_EXHAUSTIVE_PARTIAL_COMBINATIONS = 50000
@@ -242,7 +242,7 @@ prefer_simple_on_safe_tie = st.sidebar.checkbox(
 )
 
 st.sidebar.caption(
-    "V0.3B ใช้ Smart Floor Solver เดิมจาก V0.3A และเพิ่ม Professional 3D Render Export "
+    "V0.3B.1 ใช้ Smart Floor Solver เดิมจาก V0.3A และปรับ Professional 3D Render Export ให้เสถียรและสมบูรณ์ขึ้น "
     "โดยการหมุนกล่องบนพื้น 90° ยังไม่ถือว่าเป็นการเปลี่ยน H-Up / L-Up / W-Up"
 )
 
@@ -2556,14 +2556,15 @@ def generate_plotly_3d(
 
 
 
+
 # =========================================================
-# PROFESSIONAL 3D RENDER EXPORT (PNG)
+# PROFESSIONAL 3D RENDER EXPORT (PNG) — STABLE V0.3B.1
 # =========================================================
 def hex_to_rgb(value):
     value = str(value).strip().lstrip("#")
     if len(value) != 6:
         return (0, 0, 0)
-    return tuple(int(value[i:i+2], 16) for i in (0, 2, 4))
+    return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
 
 
 def rgb_to_hex(rgb):
@@ -2572,17 +2573,15 @@ def rgb_to_hex(rgb):
 
 
 def mix_rgb(rgb, factor):
-    if factor >= 1:
-        return tuple(min(255, int(round(c + (255 - c) * (factor - 1)))) for c in rgb)
+    if factor >= 1.0:
+        return tuple(min(255, int(round(c + (255 - c) * (factor - 1.0)))) for c in rgb)
     return tuple(max(0, int(round(c * factor))) for c in rgb)
 
 
-def iso_project_point(x, y, z, angle_deg=28.0, z_scale=1.0):
+def iso_project_point(x, y, z, angle_deg=30.0, z_scale=1.0):
     angle = math.radians(angle_deg)
-    cx = math.cos(angle)
-    sy = math.sin(angle)
-    sx = (x - y) * cx
-    py = (x + y) * sy - z * z_scale
+    sx = (x - y) * math.cos(angle)
+    py = (x + y) * math.sin(angle) - z * z_scale
     return sx, py
 
 
@@ -2599,164 +2598,212 @@ def cuboid_vertices(x, y, z, dx, dy, dz):
     ]
 
 
-def professional_render_cuboids(layout, carton_count, box_vertical_h):
+def professional_render_objects(layout, carton_count, box_vertical_h):
+    """
+    Build a clean and stable illustration scene for document export.
+    Accessories such as straps / guards are not built as full 3D cuboids anymore;
+    they are rendered as controlled overlay graphics to avoid broken occlusion.
+    """
     layers = build_display_stack(layout, carton_count)
     cargo_top_z = pallet_h + len(layers) * box_vertical_h if layers else pallet_h
 
-    cuboids = []
+    objects = []
 
-    # Pallet: bottom deck + three stringers + top deck for a more professional look.
-    bottom_deck_h = max(12.0, pallet_h * 0.12)
-    top_deck_h = max(18.0, pallet_h * 0.16)
-    stringer_h = max(pallet_h - bottom_deck_h - top_deck_h, 18.0)
-    stringer_y_margin = max(pallet_l * 0.04, 10.0)
-    stringer_l = max(pallet_l - 2 * stringer_y_margin, pallet_l * 0.75)
-    stringer_w = min(max(pallet_w * 0.16, 75.0), pallet_w / 4.0)
+    # ------------------------------
+    # Pallet structure
+    # ------------------------------
+    bottom_deck_h = max(14.0, pallet_h * 0.14)
+    top_deck_h = max(18.0, pallet_h * 0.18)
+    middle_h = max(pallet_h - bottom_deck_h - top_deck_h, 18.0)
+    opening_margin_y = max(12.0, pallet_l * 0.05)
+    stringer_l = max(pallet_l - 2 * opening_margin_y, pallet_l * 0.76)
+    stringer_w = min(max(pallet_w * 0.14, 78.0), pallet_w / 4.3)
 
-    pallet_base = "#ba8a4a"
-    pallet_outline = "#6b4c2c"
-
-    cuboids.append({
-        "x": 0.0, "y": 0.0, "z": 0.0,
-        "dx": pallet_w, "dy": pallet_l, "dz": bottom_deck_h,
-        "fill": pallet_base, "outline": pallet_outline,
-    })
-
-    stringer_x_positions = [
-        pallet_w * 0.09,
-        pallet_w * 0.42,
-        pallet_w * 0.75,
-    ]
-
-    for sx in stringer_x_positions:
-        sx = min(max(sx, 0.0), max(pallet_w - stringer_w, 0.0))
-        cuboids.append({
-            "x": sx,
-            "y": stringer_y_margin,
-            "z": bottom_deck_h,
-            "dx": stringer_w,
-            "dy": stringer_l,
-            "dz": stringer_h,
-            "fill": "#a66f35",
-            "outline": pallet_outline,
+    def add_prism(x, y, z, dx, dy, dz, base_fill, edge, obj_type="generic"):
+        base_rgb = hex_to_rgb(base_fill)
+        objects.append({
+            "type": obj_type,
+            "x": x,
+            "y": y,
+            "z": z,
+            "dx": dx,
+            "dy": dy,
+            "dz": dz,
+            "fill_top": rgb_to_hex(mix_rgb(base_rgb, 1.09)),
+            "fill_left": rgb_to_hex(mix_rgb(base_rgb, 0.84)),
+            "fill_right": rgb_to_hex(mix_rgb(base_rgb, 0.96)),
+            "edge": edge,
         })
 
-    cuboids.append({
-        "x": 0.0,
-        "y": 0.0,
-        "z": bottom_deck_h + stringer_h,
-        "dx": pallet_w,
-        "dy": pallet_l,
-        "dz": top_deck_h,
-        "fill": "#c99857",
-        "outline": pallet_outline,
-    })
+    pallet_edge = "#6a4a27"
+    add_prism(0.0, 0.0, 0.0, pallet_w, pallet_l, bottom_deck_h, "#b98543", pallet_edge, "pallet")
 
-    carton_color = {
-        "A": "#d89118",
-        "B": "#b8740d",
+    stringer_positions = [pallet_w * 0.08, pallet_w * 0.42, pallet_w * 0.76]
+    for sx in stringer_positions:
+        sx = min(max(sx, 0.0), max(pallet_w - stringer_w, 0.0))
+        add_prism(sx, opening_margin_y, bottom_deck_h, stringer_w, stringer_l, middle_h, "#9f6b32", pallet_edge, "pallet")
+
+    add_prism(0.0, 0.0, bottom_deck_h + middle_h, pallet_w, pallet_l, top_deck_h, "#c99654", pallet_edge, "pallet")
+
+    # Optional top slats for a more industrial look.
+    top_surface_z = bottom_deck_h + middle_h + top_deck_h
+    slat_gap = max(8.0, pallet_w * 0.012)
+    slat_count = 5
+    slat_w = (pallet_w - slat_gap * (slat_count - 1)) / slat_count
+    slat_h = max(7.0, top_deck_h * 0.22)
+    sx = 0.0
+    for _ in range(slat_count):
+        add_prism(sx, 0.0, top_surface_z - slat_h, slat_w, pallet_l, slat_h, "#d8aa6c", pallet_edge, "pallet")
+        sx += slat_w + slat_gap
+
+    # ------------------------------
+    # Cartons
+    # ------------------------------
+    carton_fill = {
+        "A": "#d59528",
+        "B": "#c9851d",
     }
-    carton_outline = "#5c3a0f"
+    carton_edge = "#6b4820"
 
     for layer_idx, layer_positions in enumerate(layers):
         z = pallet_h + layer_idx * box_vertical_h
         for p in layer_positions:
-            cuboids.append({
-                "x": p["x"],
-                "y": p["y"],
-                "z": z,
-                "dx": p["w"],
-                "dy": p["l"],
-                "dz": box_vertical_h,
-                "fill": carton_color.get(p["ROT"], "#d18b1f"),
-                "outline": carton_outline,
-            })
+            add_prism(
+                p["x"], p["y"], z,
+                p["w"], p["l"], box_vertical_h,
+                carton_fill.get(p["ROT"], "#cf8d22"),
+                carton_edge,
+                "carton",
+            )
 
-    bounds = placement_bounds(layout["PLACEMENTS"])
+    return objects, layers, cargo_top_z
+
+
+def object_draw_key(obj):
+    # Painter's algorithm: back-to-front for fixed isometric view.
+    return (
+        obj["x"] + obj["y"] + obj["z"] * 0.42,
+        obj["z"],
+        obj["type"] != "pallet",
+    )
+
+
+def projected_face_records(obj):
+    verts = cuboid_vertices(obj["x"], obj["y"], obj["z"], obj["dx"], obj["dy"], obj["dz"])
+    faces = [
+        ("left", [2, 3, 7, 6], obj["fill_left"]),
+        ("right", [1, 2, 6, 5], obj["fill_right"]),
+        ("top", [4, 5, 6, 7], obj["fill_top"]),
+    ]
+
+    out = []
+    for name, idxs, fill in faces:
+        pts3 = [verts[i] for i in idxs]
+        depth = sum((p[0] + p[1] + p[2] * 0.55) for p in pts3) / len(pts3)
+        out.append({
+            "name": name,
+            "points3": pts3,
+            "fill": fill,
+            "outline": obj["edge"],
+            "depth": depth,
+            "obj_type": obj["type"],
+        })
+    out.sort(key=lambda r: r["depth"])
+    return out
+
+
+def projected_bounds_from_faces(face_records, angle_deg=30.0):
+    proj = []
+    for face in face_records:
+        for x, y, z in face["points3"]:
+            proj.append(iso_project_point(x, y, z, angle_deg=angle_deg, z_scale=1.0))
+    min_px = min(p[0] for p in proj)
+    max_px = max(p[0] for p in proj)
+    min_py = min(p[1] for p in proj)
+    max_py = max(p[1] for p in proj)
+    return min_px, max_px, min_py, max_py
+
+
+def draw_polyline_projected(draw, points3, offset_x, offset_y, scale, color, width, angle_deg=30.0, close_path=False):
+    pts2 = []
+    for x, y, z in points3:
+        px, py = iso_project_point(x, y, z, angle_deg=angle_deg, z_scale=1.0)
+        pts2.append((offset_x + px * scale, offset_y + py * scale))
+
+    if close_path and pts2:
+        draw.line(pts2 + [pts2[0]], fill=color, width=max(1, int(round(width))))
+    else:
+        draw.line(pts2, fill=color, width=max(1, int(round(width))))
+
+
+def draw_strap_overlays(draw, bounds, cargo_top_z, offset_x, offset_y, scale, strap_px, angle_deg=30.0):
+    min_x = bounds["MIN_X"]
+    min_y = bounds["MIN_Y"]
+    max_x = bounds["MAX_X"]
+    max_y = bounds["MAX_Y"]
     used_w = bounds["SPAN_W"]
     used_l = bounds["SPAN_L"]
+
+    strap_color = "#23395d"
+    strap_shadow = "#122138"
+
+    # Wraps running mainly along the Y direction.
+    for frac in (0.28, 0.72):
+        x_pos = min_x + used_w * frac
+        path = [
+            (x_pos, min_y, pallet_h),
+            (x_pos, min_y, cargo_top_z),
+            (x_pos, max_y, cargo_top_z),
+            (x_pos, max_y, pallet_h),
+        ]
+        draw_polyline_projected(draw, path, offset_x, offset_y, scale, strap_shadow, strap_px + 2, angle_deg)
+        draw_polyline_projected(draw, path, offset_x, offset_y, scale, strap_color, strap_px, angle_deg)
+
+    # Wraps running mainly along the X direction.
+    for frac in (0.34, 0.66):
+        y_pos = min_y + used_l * frac
+        path = [
+            (min_x, y_pos, pallet_h),
+            (max_x, y_pos, pallet_h),
+            (max_x, y_pos, cargo_top_z),
+            (min_x, y_pos, cargo_top_z),
+        ]
+        draw_polyline_projected(draw, path, offset_x, offset_y, scale, strap_shadow, strap_px + 2, angle_deg)
+        draw_polyline_projected(draw, path, offset_x, offset_y, scale, strap_color, strap_px, angle_deg)
+
+
+def draw_corner_guard_overlays(draw, bounds, cargo_top_z, offset_x, offset_y, scale, guard_px, angle_deg=30.0):
     min_x = bounds["MIN_X"]
     min_y = bounds["MIN_Y"]
     max_x = bounds["MAX_X"]
     max_y = bounds["MAX_Y"]
 
-    if show_corner_guards and layout["PLACEMENTS"] and cargo_top_z > pallet_h:
-        guard_t = max(12.0, min(used_w, used_l) * 0.018)
-        guard_color = "#cfd5db"
-        guard_outline = "#66727d"
-        for gx, gy in [
-            (min_x, min_y),
-            (max_x - guard_t, min_y),
-            (min_x, max_y - guard_t),
-            (max_x - guard_t, max_y - guard_t),
-        ]:
-            cuboids.append({
-                "x": gx,
-                "y": gy,
-                "z": pallet_h,
-                "dx": guard_t,
-                "dy": guard_t,
-                "dz": cargo_top_z - pallet_h,
-                "fill": guard_color,
-                "outline": guard_outline,
-            })
+    guard_color = "#d7dde3"
+    guard_edge = "#6b7280"
 
-    if show_straps and layout["PLACEMENTS"] and cargo_top_z > pallet_h:
-        strap_t = max(8.0, min(used_w, used_l) * 0.012)
-        strap_fill = "#1f2f4f"
-        strap_outline = "#101828"
+    # Top perimeter.
+    top_loop = [
+        (min_x, min_y, cargo_top_z),
+        (max_x, min_y, cargo_top_z),
+        (max_x, max_y, cargo_top_z),
+        (min_x, max_y, cargo_top_z),
+    ]
+    draw_polyline_projected(draw, top_loop, offset_x, offset_y, scale, guard_edge, guard_px + 2, angle_deg, close_path=True)
+    draw_polyline_projected(draw, top_loop, offset_x, offset_y, scale, guard_color, guard_px, angle_deg, close_path=True)
 
-        for frac in (0.28, 0.72):
-            x_pos = min_x + used_w * frac - strap_t / 2.0
-            cuboids.append({
-                "x": x_pos,
-                "y": min_y - strap_t / 2.0,
-                "z": 0.0,
-                "dx": strap_t,
-                "dy": used_l + strap_t,
-                "dz": cargo_top_z,
-                "fill": strap_fill,
-                "outline": strap_outline,
-            })
-
-        for frac in (0.34, 0.66):
-            y_pos = min_y + used_l * frac - strap_t / 2.0
-            cuboids.append({
-                "x": min_x - strap_t / 2.0,
-                "y": y_pos,
-                "z": 0.0,
-                "dx": used_w + strap_t,
-                "dy": strap_t,
-                "dz": cargo_top_z,
-                "fill": strap_fill,
-                "outline": strap_outline,
-            })
-
-    return cuboids, cargo_top_z
-
-
-def professional_face_records(cuboids):
-    records = []
-    for cuboid in cuboids:
-        verts = cuboid_vertices(cuboid["x"], cuboid["y"], cuboid["z"], cuboid["dx"], cuboid["dy"], cuboid["dz"])
-        base_rgb = hex_to_rgb(cuboid["fill"])
-        outline = cuboid.get("outline", "#333333")
-        faces = [
-            ("left", [2, 3, 7, 6], rgb_to_hex(mix_rgb(base_rgb, 0.82))),
-            ("right", [1, 2, 6, 5], rgb_to_hex(mix_rgb(base_rgb, 0.93))),
-            ("top", [4, 5, 6, 7], rgb_to_hex(mix_rgb(base_rgb, 1.12))),
+    # Four corners.
+    for x_pos, y_pos in [
+        (min_x, min_y),
+        (max_x, min_y),
+        (max_x, max_y),
+        (min_x, max_y),
+    ]:
+        line3 = [
+            (x_pos, y_pos, pallet_h),
+            (x_pos, y_pos, cargo_top_z),
         ]
-        for face_name, idxs, fill in faces:
-            pts3 = [verts[i] for i in idxs]
-            depth = sum((p[0] + p[1] + p[2] * 0.55) for p in pts3) / len(pts3)
-            records.append({
-                "points3": pts3,
-                "fill": fill,
-                "outline": outline,
-                "depth": depth,
-            })
-    records.sort(key=lambda r: r["depth"])
-    return records
+        draw_polyline_projected(draw, line3, offset_x, offset_y, scale, guard_edge, guard_px + 2, angle_deg)
+        draw_polyline_projected(draw, line3, offset_x, offset_y, scale, guard_color, guard_px, angle_deg)
 
 
 def generate_professional_3d_png(scenario, layout, carton_count, preset_name, include_footer):
@@ -2769,80 +2816,109 @@ def generate_professional_3d_png(scenario, layout, carton_count, preset_name, in
 
     title_font = load_export_font(preset["title"], bold=True)
     subtitle_font = load_export_font(preset["subtitle"], bold=False)
-    label_font = load_export_font(preset["label"], bold=True)
     small_font = load_export_font(preset["small"], bold=False)
-    small_bold = load_export_font(preset["small"], bold=True)
 
-    title_h = int(canvas_h * 0.12)
-    footer_h = int(canvas_h * 0.13) if include_footer else int(canvas_h * 0.04)
-    margin_x = int(canvas_w * 0.055)
+    title_h = int(canvas_h * 0.10)
+    footer_h = int(canvas_h * 0.13) if include_footer else int(canvas_h * 0.05)
+    margin_x = int(canvas_w * 0.05)
     margin_top = title_h
     margin_bottom = footer_h
     plot_w = canvas_w - 2 * margin_x
     plot_h = canvas_h - margin_top - margin_bottom
 
-    pil_text_center(draw, (canvas_w / 2, preset["title"] * 0.88), "Professional 3D Packaging Render", title_font, "#111827")
+    displayed_load_h = pallet_h + len(build_display_stack(layout, carton_count)) * scenario["GROUP"]["BOX_VERTICAL_H"] if carton_count > 0 else pallet_h
+
+    pil_text_center(draw, (canvas_w / 2, preset["title"] * 0.9), "Professional 3D Packaging Render", title_font, "#111827")
     subtitle = (
-        f"{carton_count} cartons | {layout['STRATEGY']} | {scenario['GROUP']['UP_AXIS']}-Up"
-        f" | Load H {scenario['PRACTICAL_BEST']['SAFE_TOTAL_HEIGHT'] if carton_count == scenario['PRACTICAL_BEST']['SAFE_TOTAL'] else pallet_h + len(build_display_stack(layout, carton_count)) * scenario['GROUP']['BOX_VERTICAL_H']:.0f} mm"
+        f"{carton_count} cartons | {layout['STRATEGY']} | {scenario['GROUP']['UP_AXIS']}-Up | "
+        f"Load H {displayed_load_h:.0f} mm"
     )
-    pil_text_center(draw, (canvas_w / 2, preset["title"] + preset["subtitle"] * 1.35), subtitle, subtitle_font, "#475569")
+    pil_text_center(draw, (canvas_w / 2, preset["title"] + preset["subtitle"] * 1.30), subtitle, subtitle_font, "#475569")
 
-    cuboids, cargo_top_z = professional_render_cuboids(layout, carton_count, scenario["GROUP"]["BOX_VERTICAL_H"])
-    faces = professional_face_records(cuboids)
+    objects, layers, cargo_top_z = professional_render_objects(layout, carton_count, scenario["GROUP"]["BOX_VERTICAL_H"])
+    face_records = []
+    for obj in sorted(objects, key=object_draw_key):
+        face_records.extend(projected_face_records(obj))
 
-    all_points = []
-    for face in faces:
-        all_points.extend(face["points3"])
-
-    angle_deg = 28.0
-    proj_points = [iso_project_point(x, y, z, angle_deg=angle_deg, z_scale=1.0) for x, y, z in all_points]
-    min_px = min(p[0] for p in proj_points)
-    max_px = max(p[0] for p in proj_points)
-    min_py = min(p[1] for p in proj_points)
-    max_py = max(p[1] for p in proj_points)
+    angle_deg = 30.0
+    min_px, max_px, min_py, max_py = projected_bounds_from_faces(face_records, angle_deg=angle_deg)
 
     span_x = max(max_px - min_px, 1.0)
     span_y = max(max_py - min_py, 1.0)
-    scale = min(plot_w / span_x, plot_h / span_y)
-    scale *= 0.95
-
+    scale = min(plot_w / span_x, plot_h / span_y) * 0.92
     offset_x = margin_x + (plot_w - span_x * scale) / 2.0 - min_px * scale
     offset_y = margin_top + (plot_h - span_y * scale) / 2.0 - min_py * scale
 
     # Ground shadow.
-    shadow_base = [
-        (0.0, 0.0, 0.0),
-        (pallet_w, 0.0, 0.0),
-        (pallet_w, pallet_l, 0.0),
-        (0.0, pallet_l, 0.0),
+    shadow_path3 = [
+        (-25.0, -15.0, 0.0),
+        (pallet_w + 25.0, -15.0, 0.0),
+        (pallet_w + 25.0, pallet_l + 15.0, 0.0),
+        (-25.0, pallet_l + 15.0, 0.0),
     ]
     shadow_pts = []
-    for x, y, z in shadow_base:
+    for x, y, z in shadow_path3:
         px, py = iso_project_point(x, y, z, angle_deg=angle_deg, z_scale=1.0)
-        shadow_pts.append((offset_x + px * scale, offset_y + py * scale + max(8, preset['line'] * 4)))
-    draw.polygon(shadow_pts, fill="#e5e7eb")
+        shadow_pts.append((offset_x + px * scale, offset_y + py * scale + max(7, preset['line'] * 3.5)))
+    draw.polygon(shadow_pts, fill="#e7eaee")
 
-    for face in faces:
+    # Render visible prism faces.
+    for face in sorted(face_records, key=lambda r: r["depth"]):
         pts2 = []
         for x, y, z in face["points3"]:
             px, py = iso_project_point(x, y, z, angle_deg=angle_deg, z_scale=1.0)
             pts2.append((offset_x + px * scale, offset_y + py * scale))
         draw.polygon(pts2, fill=face["fill"], outline=face["outline"])
-        # Slightly reinforce outline.
-        draw.line(pts2 + [pts2[0]], fill=face["outline"], width=max(1, int(preset["line"] * 0.55)))
+        draw.line(pts2 + [pts2[0]], fill=face["outline"], width=max(1, int(round(preset["line"] * 0.45))))
 
-    # Footer.
+    # Overlay accessories in 2D projected space for a cleaner document render.
+    bounds = placement_bounds(layout["PLACEMENTS"])
+    if layout["PLACEMENTS"] and cargo_top_z > pallet_h:
+        if show_corner_guards:
+            draw_corner_guard_overlays(
+                draw, bounds, cargo_top_z, offset_x, offset_y, scale,
+                guard_px=max(2, int(round(preset["line"] * 1.1))),
+                angle_deg=angle_deg,
+            )
+        if show_straps:
+            draw_strap_overlays(
+                draw, bounds, cargo_top_z, offset_x, offset_y, scale,
+                strap_px=max(2, int(round(preset["line"] * 1.25))),
+                angle_deg=angle_deg,
+            )
+
+    # Height limit plane / line.
+    if show_height_plane:
+        plane_loop3 = [
+            (0.0, 0.0, max_total_height),
+            (pallet_w, 0.0, max_total_height),
+            (pallet_w, pallet_l, max_total_height),
+            (0.0, pallet_l, max_total_height),
+        ]
+        plane_pts = []
+        for x, y, z in plane_loop3:
+            px, py = iso_project_point(x, y, z, angle_deg=angle_deg, z_scale=1.0)
+            plane_pts.append((offset_x + px * scale, offset_y + py * scale))
+        draw.polygon(plane_pts, fill="#fef2f2", outline="#dc2626")
+        draw.line(plane_pts + [plane_pts[0]], fill="#dc2626", width=max(1, int(round(preset["line"] * 0.75))))
+
     if include_footer:
         footer_1, footer_2 = export_footer_lines(scenario, layout, carton_count)
         line_y = canvas_h - footer_h
         draw.line((margin_x, line_y, canvas_w - margin_x, line_y), fill="#cbd5e1", width=2)
         draw.text((margin_x, line_y + preset["small"] * 0.9), footer_1, font=small_font, fill="#334155")
-        draw.text((margin_x, line_y + preset["small"] * 2.4), footer_2, font=small_font, fill="#334155")
-        pil_text_right(draw, (canvas_w - margin_x, line_y + preset["small"] * 2.4), "Professional isometric packaging illustration", small_font, "#64748b")
+        draw.text((margin_x, line_y + preset["small"] * 2.35), footer_2, font=small_font, fill="#334155")
+        pil_text_right(draw, (canvas_w - margin_x, line_y + preset["small"] * 2.35), "Professional isometric packaging illustration", small_font, "#64748b")
+        note_y = line_y - preset["small"] * 1.8
+    else:
+        note_y = canvas_h - preset["small"] * 1.85
 
-    note_y = canvas_h - (footer_h if include_footer else 20) - preset["small"] * 1.15
-    draw.text((margin_x, note_y), "Rendered from current layout • Accessories are illustrative engineering communication aids", font=small_font, fill="#64748b")
+    draw.text(
+        (margin_x, note_y),
+        "Rendered from current layout • Accessories are illustrative engineering communication aids",
+        font=small_font,
+        fill="#64748b",
+    )
 
     output = io.BytesIO()
     image.save(output, format="PNG", optimize=True)
