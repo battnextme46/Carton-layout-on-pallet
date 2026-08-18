@@ -12,7 +12,7 @@ import streamlit as st
 # =========================================================
 # PAGE CONFIG
 # =========================================================
-APP_VERSION = "V0.3C.1"
+APP_VERSION = "V0.3C.1.1"
 MODULE_NAME = "Module 02 — Carton Palletizing Optimizer"
 EPS = 1e-9
 MAX_EXHAUSTIVE_PARTIAL_COMBINATIONS = 50000
@@ -2708,7 +2708,7 @@ def iso25_has_right_neighbor(p, layer_positions):
     wedges while preserving the exterior right face of the stack.
     """
     face_x = p["x"] + p["w"]
-    tolerance = max(5.0, box_gap + 3.0)
+    tolerance = max(5.0, box_tolerance + 3.0)
 
     for q in layer_positions:
         if q is p:
