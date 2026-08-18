@@ -12,7 +12,7 @@ import streamlit as st
 # =========================================================
 # PAGE CONFIG
 # =========================================================
-APP_VERSION = "V0.3C.3.2"
+APP_VERSION = "V0.3C.3.3"
 MODULE_NAME = "Module 02 — Carton Palletizing Optimizer"
 EPS = 1e-9
 MAX_EXHAUSTIVE_PARTIAL_COMBINATIONS = 50000
@@ -77,7 +77,7 @@ st.markdown(
 st.title("📦 Carton Palletizing Layout Optimizer")
 st.caption(
     f"{APP_VERSION} • NPI Packaging Engineering Toolkit • {MODULE_NAME} "
-    "— Professional 2.5D Export Engine + Strap / Corner / Top Edge Guard Layer + Top Edge Guard Geometry Fix + Cross Strap Layer + Document-ready Export + True-scale Engineering View"
+    "— Professional 2.5D Export Engine + Strap Projection & Top Path Cleanup + Horizontal Cross Strap Layer + Document-ready Export + True-scale Engineering View"
 )
 
 
@@ -242,7 +242,7 @@ prefer_simple_on_safe_tie = st.sidebar.checkbox(
 )
 
 st.sidebar.caption(
-    "V0.3C.3.2 ใช้ Smart Floor Solver เดิมและปรับ Professional 2.5D Top Edge Guard เป็น continuous rigid L-profile "
+    "V0.3C.3.3 ใช้ Smart Floor Solver เดิมและปรับ Professional 2.5D Strap Projection / Top Path Cleanup พร้อม Horizontal Cross Strap Layer "
     "โดยการหมุนกล่องบนพื้น 90° ยังไม่ถือว่าเป็นการเปลี่ยน H-Up / L-Up / W-Up"
 )
 
@@ -260,6 +260,15 @@ show_corner_guards = st.sidebar.checkbox(
 show_straps = st.sidebar.checkbox(
     "แสดง Straps",
     value=True,
+)
+
+horizontal_strap_count = st.sidebar.slider(
+    "จำนวน Strap แนวขวาง (2.5D)",
+    min_value=0,
+    max_value=4,
+    value=2,
+    step=1,
+    help="จำนวนสายรัดแนวขวางที่คาดรอบ Front / Right visible faces ใน Professional 2.5D",
 )
 
 show_height_plane = st.sidebar.checkbox(
@@ -2558,7 +2567,7 @@ def generate_plotly_3d(
 
 
 # =========================================================
-# PROFESSIONAL 2.5D RENDERER — V0.3C.3.2
+# PROFESSIONAL 2.5D RENDERER — V0.3C.3.3
 # Stable fixed-view oblique/isometric-style illustration.
 # Includes Cartons + Pallet + Strap + Corner / Top Edge Guard layers.
 # =========================================================
@@ -2958,7 +2967,7 @@ def draw_iso25_accessories(
     strap_outline = "#0F2850"
 
     # ---------------------------------------------------------
-    # Guard sizing — V0.3C.3.2
+    # Guard sizing — V0.3C.3.3
     # Larger wings / legs so the guard visibly wraps the corner.
     # ---------------------------------------------------------
     guard_face = max(
@@ -3034,21 +3043,6 @@ def draw_iso25_accessories(
     y_positions = [
         min_y + used_l * 0.32,
         min_y + used_l * 0.68,
-    ]
-
-    # Cross-strap centerlines shown on the top face only.
-    # These add the requested horizontal / transverse strap read without
-    # creating confusing hidden rear geometry on the side faces.
-    cross_x_positions = [
-        min_x + used_w * 0.18,
-        min_x + used_w * 0.50,
-        min_x + used_w * 0.82,
-    ]
-
-    cross_y_positions = [
-        min_y + used_l * 0.22,
-        min_y + used_l * 0.50,
-        min_y + used_l * 0.78,
     ]
 
     # =========================================================
@@ -3353,45 +3347,88 @@ def draw_iso25_accessories(
             )
 
         # -----------------------------------------------------
-        # Cross-strap layer on the visible TOP only
-        # Adds the requested horizontal / transverse strap read without
-        # introducing hidden rear-face clutter on side elevations.
+        # Horizontal cross straps — TRUE SIDE WRAP
+        # These straps wrap around the carton stack at selected Z levels.
+        # Only the visible Front + Right segments are drawn in the fixed
+        # front-right 2.5D view; hidden rear/left segments are intentionally
+        # omitted.  No extra top-only lines are generated, which removes the
+        # duplicated / cluttered strap paths seen in V0.3C.3.2.
         # -----------------------------------------------------
-        cross_top_z = top_z + strap_t * 0.10
+        if horizontal_strap_count > 0:
+            cargo_h = max(cargo_top_z - pallet_h, 1.0)
 
-        for cx in cross_x_positions:
-            draw_iso25_top_strip(
-                draw,
-                cx - strap_t / 2.0,
-                min_y,
-                cross_top_z,
-                strap_t,
-                used_l,
-                strap_t,
-                strap_fill,
-                strap_outline,
-                offset_x,
-                offset_y,
-                scale,
-                line_width,
+            # Evenly space horizontal straps while keeping them away from the
+            # very top/bottom edges and from the pallet deck.
+            if horizontal_strap_count == 1:
+                horizontal_levels = [0.52]
+            else:
+                low_frac = 0.30
+                high_frac = 0.72
+                step_frac = (
+                    (high_frac - low_frac)
+                    / max(horizontal_strap_count - 1, 1)
+                )
+                horizontal_levels = [
+                    low_frac + i * step_frac
+                    for i in range(horizontal_strap_count)
+                ]
+
+            cross_band_h = max(
+                14.0,
+                min(
+                    24.0,
+                    strap_w * 0.88,
+                ),
             )
 
-        for cy in cross_y_positions:
-            draw_iso25_top_strip(
-                draw,
-                min_x,
-                cy - strap_t / 2.0,
-                cross_top_z,
-                used_w,
+            cross_band_t = max(
+                3.0,
                 strap_t,
-                strap_t,
-                strap_fill,
-                strap_outline,
-                offset_x,
-                offset_y,
-                scale,
-                line_width,
             )
+
+            for frac in horizontal_levels:
+                band_center_z = pallet_h + cargo_h * frac
+                band_z = band_center_z - cross_band_h / 2.0
+
+                # Front visible horizontal band.
+                draw_iso25_prism(
+                    draw,
+                    min_x,
+                    min_y - cross_band_t * 0.10,
+                    band_z,
+                    used_w,
+                    cross_band_t,
+                    cross_band_h,
+                    strap_fill,
+                    strap_outline,
+                    offset_x,
+                    offset_y,
+                    scale,
+                    line_width,
+                    show_front=True,
+                    show_right=False,
+                    show_top=False,
+                )
+
+                # Right visible horizontal band.
+                draw_iso25_prism(
+                    draw,
+                    max_x - cross_band_t,
+                    min_y,
+                    band_z,
+                    cross_band_t,
+                    used_l,
+                    cross_band_h,
+                    strap_fill,
+                    strap_outline,
+                    offset_x,
+                    offset_y,
+                    scale,
+                    line_width,
+                    show_front=False,
+                    show_right=True,
+                    show_top=False,
+                )
 
 def generate_professional_25d_png(
     scenario,
@@ -6049,7 +6086,7 @@ def render_export_center(
         expanded=False,
     ):
         st.caption(
-            "V0.3C.3.2 สร้างไฟล์เฉพาะเมื่อกด Prepare Export Files "
+            "V0.3C.3.3 สร้างไฟล์เฉพาะเมื่อกด Prepare Export Files "
             "เพื่อไม่ให้การปรับ Input และ Visualization ช้าลง"
         )
 
@@ -6335,7 +6372,7 @@ def render_export_center(
 
         st.info(
             "✅ V0.3C.1 Professional Export เปลี่ยนเป็น Fixed 2.5D Isometric Renderer แล้ว • "
-            "V0.3C.3.2 แสดง Cartons + Pallet + Strap + Corner / Top Edge Guard แบบ fixed 2.5D โดย Top Edge Guard ใช้ continuous L-profile + full visible top perimeter and cross strap layer"
+            "V0.3C.3.3 แสดง Cartons + Pallet + Strap + Corner / Top Edge Guard แบบ fixed 2.5D โดย cleanup เส้น strap บน top และเพิ่ม strap แนวขวางบน Front / Right visible faces"
         )
 
 # =========================================================
@@ -6709,7 +6746,7 @@ def render_scenario(
         )
 
         st.caption(
-            "V0.3C.3.2 ปรับ Top Edge Guard ให้เป็น continuous L-profile ปีกใหญ่ขึ้น และยังคงไม่ใช้ Height Plane ในภาพ 2.5D "
+            "V0.3C.3.3 คง Top Edge Guard continuous L-profile และแก้ strap projection ให้มี Horizontal Cross Strap บน Front / Right visible faces โดยไม่สร้าง hidden rear strap "
             "เพื่อพิสูจน์ Carton + Pallet geometry และ occlusion ให้ผ่านก่อน"
         )
 
@@ -7247,7 +7284,7 @@ with st.expander(
 ):
     st.markdown(
         """
-        **V0.3C.3.2 Professional 2.5D Renderer — Top Edge Guard Geometry Fix + Cross Strap Layer**
+        **V0.3C.3.3 Professional 2.5D Renderer — Strap Projection & Top Path Cleanup**
 
         - **Smart Floor Solver ใช้ Logic เดิมจาก V0.2** และยังประเมิน Floor Pattern หลาย Strategy ภายใน Up Orientation เดียวกัน:
           **Simple Grid, Mixed Rows, Mixed Columns และ Residual L-Fill**.
@@ -7275,7 +7312,7 @@ with st.expander(
         - ต่อยอด Fixed Professional 2.5D Renderer (PNG) ด้วย **Strap / Corner / Top Edge Guard Layer แบบ visible-face only**.
         - 2.5D วาดเฉพาะ visible Top / Front / Right faces จึงไม่เกิด rear-face / hidden-surface artifacts แบบเดิม.
         - Carton position และ Partial Top Layer ใช้ Solver placements / `build_display_stack()` โดยตรง.
-        - V0.3C.3.2 ใช้ **Cartons + Pallet + Strap + Corner / Top Edge Guard** ใน fixed 2.5D และปรับ Top Edge Guard เป็น continuous L-profile เพื่อให้ใกล้ลักษณะชิ้นงานจริงมากขึ้น.
+        - V0.3C.3.3 ใช้ **Cartons + Pallet + Strap + Corner / Top Edge Guard** ใน fixed 2.5D, ตัด top-only cross-strip ที่ซ้ำออก และเพิ่ม Horizontal Cross Strap บน Front / Right visible faces.
         - Lightweight 3D ยังคงไว้สำหรับ interactive review เท่านั้น ไม่ใช้เป็น Professional Document Export.
         - Lightweight 3D รวม carton meshes / edges เป็น grouped traces, ใช้ orthographic camera และ render เฉพาะเมื่อผู้ใช้เลือก 3D View.
         - 3D Corner / Top Edge Guards / Straps เป็น **Illustration only** ไม่ใช่ระบบคำนวณหรือ Recommendation.
