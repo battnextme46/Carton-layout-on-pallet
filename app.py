@@ -1,7 +1,10 @@
 
+import io
 import math
+import re
 from itertools import combinations
 
+from PIL import Image, ImageDraw, ImageFont
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -9,7 +12,7 @@ import streamlit as st
 # =========================================================
 # PAGE CONFIG
 # =========================================================
-APP_VERSION = "V0.2.1"
+APP_VERSION = "V0.3A"
 MODULE_NAME = "Module 02 — Carton Palletizing Optimizer"
 EPS = 1e-9
 MAX_EXHAUSTIVE_PARTIAL_COMBINATIONS = 50000
@@ -74,7 +77,7 @@ st.markdown(
 st.title("📦 Carton Palletizing Layout Optimizer")
 st.caption(
     f"{APP_VERSION} • NPI Packaging Engineering Toolkit • {MODULE_NAME} "
-    "— V0.2 Solver + True-scale Engineering View + Lightweight 3D + Performance Update"
+    "— Export Foundation + Document-ready PNG/SVG + V0.2 Solver + True-scale Engineering View"
 )
 
 
@@ -239,7 +242,7 @@ prefer_simple_on_safe_tie = st.sidebar.checkbox(
 )
 
 st.sidebar.caption(
-    "V0.2.1 ใช้ Smart Floor Solver เดิมจาก V0.2 และปรับ Visualization / Performance "
+    "V0.3A ใช้ Smart Floor Solver เดิมจาก V0.2.1 และเพิ่ม Document-ready PNG/SVG Export "
     "โดยการหมุนกล่องบนพื้น 90° ยังไม่ถือว่าเป็นการเปลี่ยน H-Up / L-Up / W-Up"
 )
 
@@ -2552,6 +2555,2580 @@ def generate_plotly_3d(
     return fig
 
 
+
+# =========================================================
+# EXPORT FOUNDATION — DOCUMENT-READY PNG / SVG
+# =========================================================
+EXPORT_PRESETS = {
+    "Document Small": {
+        "width": 1400,
+        "height": 900,
+        "title": 34,
+        "subtitle": 20,
+        "label": 19,
+        "small": 16,
+        "line": 3,
+    },
+    "Document Standard": {
+        "width": 1800,
+        "height": 1200,
+        "title": 42,
+        "subtitle": 24,
+        "label": 22,
+        "small": 18,
+        "line": 4,
+    },
+    "Presentation / Full Width": {
+        "width": 2400,
+        "height": 1350,
+        "title": 50,
+        "subtitle": 28,
+        "label": 26,
+        "small": 21,
+        "line": 5,
+    },
+    "High Resolution": {
+        "width": 3200,
+        "height": 2000,
+        "title": 64,
+        "subtitle": 34,
+        "label": 31,
+        "small": 25,
+        "line": 6,
+    },
+}
+
+
+def safe_filename_part(value):
+    value = str(value).strip()
+    value = re.sub(r"[^A-Za-z0-9._-]+", "-", value)
+    value = re.sub(r"-+", "-", value)
+    return value.strip("-") or "output"
+
+
+def load_export_font(size, bold=False):
+    candidates = []
+
+    if bold:
+        candidates.extend(
+            [
+                "DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+            ]
+        )
+    else:
+        candidates.extend(
+            [
+                "DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+            ]
+        )
+
+    for candidate in candidates:
+        try:
+            return ImageFont.truetype(
+                candidate,
+                size=max(int(size), 8),
+            )
+        except Exception:
+            pass
+
+    return ImageFont.load_default()
+
+
+def pil_text_bbox(draw, text_value, font):
+    try:
+        return draw.textbbox(
+            (0, 0),
+            str(text_value),
+            font=font,
+        )
+    except Exception:
+        return (0, 0, 0, 0)
+
+
+def pil_text_center(
+    draw,
+    xy,
+    text_value,
+    font,
+    fill,
+):
+    bbox = pil_text_bbox(
+        draw,
+        text_value,
+        font,
+    )
+
+    tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
+
+    draw.text(
+        (
+            xy[0] - tw / 2,
+            xy[1] - th / 2,
+        ),
+        str(text_value),
+        font=font,
+        fill=fill,
+    )
+
+
+def pil_text_right(
+    draw,
+    xy,
+    text_value,
+    font,
+    fill,
+):
+    bbox = pil_text_bbox(
+        draw,
+        text_value,
+        font,
+    )
+
+    tw = bbox[2] - bbox[0]
+
+    draw.text(
+        (
+            xy[0] - tw,
+            xy[1],
+        ),
+        str(text_value),
+        font=font,
+        fill=fill,
+    )
+
+
+def draw_dashed_line(
+    draw,
+    xy,
+    fill,
+    width,
+    dash=18,
+    gap=10,
+):
+    x1, y1, x2, y2 = xy
+
+    dx = x2 - x1
+    dy = y2 - y1
+    length = math.hypot(dx, dy)
+
+    if length <= EPS:
+        return
+
+    ux = dx / length
+    uy = dy / length
+
+    pos = 0.0
+
+    while pos < length:
+        end = min(
+            pos + dash,
+            length,
+        )
+
+        draw.line(
+            (
+                x1 + ux * pos,
+                y1 + uy * pos,
+                x1 + ux * end,
+                y1 + uy * end,
+            ),
+            fill=fill,
+            width=max(int(width), 1),
+        )
+
+        pos += dash + gap
+
+
+def mixed_pattern_text(layout):
+    strategy = layout["STRATEGY"]
+
+    if strategy == "Mixed Rows":
+        groups = {}
+
+        for p in layout["PLACEMENTS"]:
+            key = round(
+                p["y"],
+                3,
+            )
+
+            groups.setdefault(
+                key,
+                0,
+            )
+
+            groups[key] += 1
+
+        counts = [
+            groups[key]
+            for key in sorted(groups)
+        ]
+
+        return " + ".join(
+            str(x)
+            for x in counts
+        )
+
+    if strategy == "Mixed Columns":
+        groups = {}
+
+        for p in layout["PLACEMENTS"]:
+            key = round(
+                p["x"],
+                3,
+            )
+
+            groups.setdefault(
+                key,
+                0,
+            )
+
+            groups[key] += 1
+
+        counts = [
+            groups[key]
+            for key in sorted(groups)
+        ]
+
+        return " + ".join(
+            str(x)
+            for x in counts
+        )
+
+    return (
+        f"A {layout['A_COUNT']} + "
+        f"B {layout['B_COUNT']}"
+    )
+
+
+def export_footer_lines(
+    scenario,
+    layout,
+    carton_count,
+):
+    layers_used = (
+        int(
+            math.ceil(
+                carton_count
+                / max(
+                    layout["COUNT"],
+                    1,
+                )
+            )
+        )
+        if carton_count > 0
+        else 0
+    )
+
+    total_height = (
+        pallet_h
+        + layers_used
+        * scenario["GROUP"]["BOX_VERTICAL_H"]
+    )
+
+    gross_weight = (
+        pallet_tare_weight
+        + carton_count
+        * box_weight
+    )
+
+    line_1 = (
+        f"Carton: {box_w:.0f} x {box_l:.0f} x {box_h:.0f} mm  |  "
+        f"Pallet: {pallet_w:.0f} x {pallet_l:.0f} mm  |  "
+        f"Orientation: {scenario['GROUP']['UP_AXIS']}-Up"
+    )
+
+    line_2 = (
+        f"Strategy: {layout['STRATEGY']}  |  "
+        f"{layout['COUNT']} pcs/layer  |  "
+        f"Displayed total: {carton_count} pcs  |  "
+        f"Total H: {total_height:.0f} mm  |  "
+        f"Gross Wt: {gross_weight:.1f} kg"
+    )
+
+    return line_1, line_2
+
+
+def build_export_filename(
+    kind,
+    scenario,
+    layout,
+    carton_count,
+    extension,
+):
+    return (
+        f"{safe_filename_part(kind)}_"
+        f"{int(box_w)}x{int(box_l)}x{int(box_h)}_"
+        f"{scenario['GROUP']['UP_AXIS']}-Up_"
+        f"{safe_filename_part(layout['STRATEGY'])}_"
+        f"{int(carton_count)}pcs."
+        f"{extension}"
+    )
+
+
+def svg_escape(value):
+    text_value = str(value)
+
+    return (
+        text_value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def generate_export_top_svg(
+    scenario,
+    layout,
+    carton_count,
+    preset_name,
+    include_footer,
+):
+    preset = EXPORT_PRESETS[preset_name]
+
+    canvas_w = preset["width"]
+    canvas_h = preset["height"]
+
+    title_h = int(canvas_h * 0.16)
+    footer_h = (
+        int(canvas_h * 0.13)
+        if include_footer
+        else int(canvas_h * 0.04)
+    )
+
+    margin_x = int(canvas_w * 0.07)
+    plot_top = title_h
+    plot_bottom = canvas_h - footer_h
+
+    plot_w = (
+        canvas_w
+        - 2 * margin_x
+    )
+
+    plot_h = (
+        plot_bottom
+        - plot_top
+    )
+
+    world_w = max(
+        allowable_w,
+        1.0,
+    )
+
+    world_l = max(
+        allowable_l,
+        1.0,
+    )
+
+    scale = min(
+        plot_w / world_w,
+        plot_h / world_l,
+    )
+
+    draw_w = world_w * scale
+    draw_h = world_l * scale
+
+    world_x0 = (
+        margin_x
+        + (plot_w - draw_w) / 2.0
+    )
+
+    world_y0 = (
+        plot_top
+        + (plot_h - draw_h) / 2.0
+    )
+
+    pallet_x = (
+        world_x0
+        + overhang_allowance
+        * scale
+    )
+
+    pallet_y = (
+        world_y0
+        + overhang_allowance
+        * scale
+    )
+
+    title = "Carton Palletizing Pattern"
+
+    subtitle = (
+        f"{layout['COUNT']} pcs/layer"
+        f"  |  {layout['STRATEGY']}"
+        f"  |  {scenario['GROUP']['UP_AXIS']}-Up"
+    )
+
+    pattern_note = mixed_pattern_text(
+        layout
+    )
+
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'width="{canvas_w}" height="{canvas_h}" '
+        f'viewBox="0 0 {canvas_w} {canvas_h}">'
+        f'<rect x="0" y="0" width="{canvas_w}" height="{canvas_h}" fill="#ffffff"/>'
+    )
+
+    svg += (
+        f'<text x="{canvas_w/2}" y="{preset["title"] + 18}" '
+        f'font-family="DejaVu Sans,Arial,sans-serif" '
+        f'font-size="{preset["title"]}" font-weight="700" '
+        f'fill="#111827" text-anchor="middle">{svg_escape(title)}</text>'
+    )
+
+    svg += (
+        f'<text x="{canvas_w/2}" y="{preset["title"] + preset["subtitle"] + 38}" '
+        f'font-family="DejaVu Sans,Arial,sans-serif" '
+        f'font-size="{preset["subtitle"]}" '
+        f'fill="#475569" text-anchor="middle">{svg_escape(subtitle)}</text>'
+    )
+
+    svg += (
+        f'<text x="{canvas_w/2}" y="{preset["title"] + preset["subtitle"]*2 + 52}" '
+        f'font-family="DejaVu Sans,Arial,sans-serif" '
+        f'font-size="{preset["small"]}" '
+        f'fill="#64748b" text-anchor="middle">'
+        f'Layer sequence: {svg_escape(pattern_note)}</text>'
+    )
+
+    if overhang_allowance > 0:
+        svg += (
+            f'<rect x="{world_x0}" y="{world_y0}" '
+            f'width="{draw_w}" height="{draw_h}" '
+            f'fill="none" stroke="#94a3b8" '
+            f'stroke-width="{preset["line"]}" '
+            f'stroke-dasharray="18,12"/>'
+        )
+
+    svg += (
+        f'<rect x="{pallet_x}" y="{pallet_y}" '
+        f'width="{pallet_w*scale}" height="{pallet_l*scale}" '
+        f'fill="#f8fafc" stroke="#334155" '
+        f'stroke-width="{preset["line"]*1.4}" rx="8"/>'
+    )
+
+    color_map = {
+        "A": {
+            "fill": "#f2dfbd",
+            "stroke": "#9a5b13",
+            "text": "#5f370e",
+        },
+        "B": {
+            "fill": "#d8e6f2",
+            "stroke": "#2f5f85",
+            "text": "#1f415e",
+        },
+    }
+
+    box_label_font = max(
+        preset["small"],
+        int(
+            min(
+                30,
+                max(
+                    15,
+                    min(
+                        box_w,
+                        box_l,
+                    )
+                    * scale
+                    * 0.10,
+                ),
+            )
+        ),
+    )
+
+    for p in layout["PLACEMENTS"]:
+        x = (
+            pallet_x
+            + p["x"]
+            * scale
+        )
+
+        y = (
+            pallet_y
+            + p["y"]
+            * scale
+        )
+
+        w = p["w"] * scale
+        h = p["l"] * scale
+
+        c = color_map[
+            p["ROT"]
+        ]
+
+        svg += (
+            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" '
+            f'fill="{c["fill"]}" stroke="{c["stroke"]}" '
+            f'stroke-width="{max(2,preset["line"]*0.7)}" rx="5"/>'
+        )
+
+        if (
+            w >= box_label_font * 3.6
+            and h >= box_label_font * 1.7
+        ):
+            svg += (
+                f'<text x="{x+w/2}" y="{y+h/2+box_label_font*0.34}" '
+                f'font-family="DejaVu Sans,Arial,sans-serif" '
+                f'font-size="{box_label_font}" font-weight="700" '
+                f'fill="{c["text"]}" text-anchor="middle">'
+                f'{int(p["w"])}x{int(p["l"])}</text>'
+            )
+
+    dimension_y = min(
+        canvas_h - footer_h + preset["label"],
+        pallet_y
+        + pallet_l
+        * scale
+        + preset["label"] * 1.8,
+    )
+
+    svg += (
+        f'<text x="{pallet_x + pallet_w*scale/2}" y="{dimension_y}" '
+        f'font-family="DejaVu Sans,Arial,sans-serif" '
+        f'font-size="{preset["label"]}" font-weight="700" '
+        f'fill="#334155" text-anchor="middle">'
+        f'Pallet W {pallet_w:.0f} mm</text>'
+    )
+
+    svg += (
+        f'<text x="{max(pallet_x-preset["label"]*2.8, 30)}" '
+        f'y="{pallet_y+pallet_l*scale/2}" '
+        f'font-family="DejaVu Sans,Arial,sans-serif" '
+        f'font-size="{preset["label"]}" font-weight="700" '
+        f'fill="#334155" text-anchor="middle" '
+        f'transform="rotate(-90,{max(pallet_x-preset["label"]*2.8, 30)},'
+        f'{pallet_y+pallet_l*scale/2})">'
+        f'Pallet L {pallet_l:.0f} mm</text>'
+    )
+
+    if include_footer:
+        footer_1, footer_2 = export_footer_lines(
+            scenario,
+            layout,
+            carton_count,
+        )
+
+        footer_y = canvas_h - footer_h + preset["small"] * 1.3
+
+        svg += (
+            f'<line x1="{margin_x}" y1="{canvas_h-footer_h}" '
+            f'x2="{canvas_w-margin_x}" y2="{canvas_h-footer_h}" '
+            f'stroke="#cbd5e1" stroke-width="2"/>'
+        )
+
+        svg += (
+            f'<text x="{margin_x}" y="{footer_y}" '
+            f'font-family="DejaVu Sans,Arial,sans-serif" '
+            f'font-size="{preset["small"]}" fill="#334155">'
+            f'{svg_escape(footer_1)}</text>'
+        )
+
+        svg += (
+            f'<text x="{margin_x}" y="{footer_y+preset["small"]*1.6}" '
+            f'font-family="DejaVu Sans,Arial,sans-serif" '
+            f'font-size="{preset["small"]}" fill="#334155">'
+            f'{svg_escape(footer_2)}</text>'
+        )
+
+        svg += (
+            f'<text x="{canvas_w-margin_x}" y="{footer_y+preset["small"]*1.6}" '
+            f'font-family="DejaVu Sans,Arial,sans-serif" '
+            f'font-size="{preset["small"]}" fill="#64748b" text-anchor="end">'
+            f'Engineering visualization reference</text>'
+        )
+
+    svg += "</svg>"
+
+    return svg
+
+
+def generate_export_top_png(
+    scenario,
+    layout,
+    carton_count,
+    preset_name,
+    include_footer,
+):
+    preset = EXPORT_PRESETS[
+        preset_name
+    ]
+
+    canvas_w = preset["width"]
+    canvas_h = preset["height"]
+
+    image = Image.new(
+        "RGB",
+        (
+            canvas_w,
+            canvas_h,
+        ),
+        "white",
+    )
+
+    draw = ImageDraw.Draw(
+        image
+    )
+
+    title_font = load_export_font(
+        preset["title"],
+        bold=True,
+    )
+
+    subtitle_font = load_export_font(
+        preset["subtitle"],
+        bold=False,
+    )
+
+    label_font = load_export_font(
+        preset["label"],
+        bold=True,
+    )
+
+    small_font = load_export_font(
+        preset["small"],
+        bold=False,
+    )
+
+    small_bold_font = load_export_font(
+        preset["small"],
+        bold=True,
+    )
+
+    title_h = int(
+        canvas_h * 0.16
+    )
+
+    footer_h = (
+        int(canvas_h * 0.13)
+        if include_footer
+        else int(canvas_h * 0.04)
+    )
+
+    margin_x = int(
+        canvas_w * 0.07
+    )
+
+    plot_top = title_h
+    plot_bottom = (
+        canvas_h
+        - footer_h
+    )
+
+    plot_w = (
+        canvas_w
+        - 2 * margin_x
+    )
+
+    plot_h = (
+        plot_bottom
+        - plot_top
+    )
+
+    scale = min(
+        plot_w
+        / max(
+            allowable_w,
+            1.0,
+        ),
+        plot_h
+        / max(
+            allowable_l,
+            1.0,
+        ),
+    )
+
+    draw_w = (
+        allowable_w
+        * scale
+    )
+
+    draw_h = (
+        allowable_l
+        * scale
+    )
+
+    world_x0 = (
+        margin_x
+        + (plot_w - draw_w)
+        / 2.0
+    )
+
+    world_y0 = (
+        plot_top
+        + (plot_h - draw_h)
+        / 2.0
+    )
+
+    pallet_x = (
+        world_x0
+        + overhang_allowance
+        * scale
+    )
+
+    pallet_y = (
+        world_y0
+        + overhang_allowance
+        * scale
+    )
+
+    pil_text_center(
+        draw,
+        (
+            canvas_w / 2,
+            preset["title"] * 0.85,
+        ),
+        "Carton Palletizing Pattern",
+        title_font,
+        "#111827",
+    )
+
+    subtitle = (
+        f"{layout['COUNT']} pcs/layer | "
+        f"{layout['STRATEGY']} | "
+        f"{scenario['GROUP']['UP_AXIS']}-Up"
+    )
+
+    pil_text_center(
+        draw,
+        (
+            canvas_w / 2,
+            preset["title"]
+            + preset["subtitle"]
+            * 1.35,
+        ),
+        subtitle,
+        subtitle_font,
+        "#475569",
+    )
+
+    pil_text_center(
+        draw,
+        (
+            canvas_w / 2,
+            preset["title"]
+            + preset["subtitle"]
+            * 2.55,
+        ),
+        (
+            "Layer sequence: "
+            + mixed_pattern_text(
+                layout
+            )
+        ),
+        small_font,
+        "#64748b",
+    )
+
+    if overhang_allowance > 0:
+        draw_dashed_line(
+            draw,
+            (
+                world_x0,
+                world_y0,
+                world_x0 + draw_w,
+                world_y0,
+            ),
+            "#94a3b8",
+            preset["line"],
+        )
+
+        draw_dashed_line(
+            draw,
+            (
+                world_x0 + draw_w,
+                world_y0,
+                world_x0 + draw_w,
+                world_y0 + draw_h,
+            ),
+            "#94a3b8",
+            preset["line"],
+        )
+
+        draw_dashed_line(
+            draw,
+            (
+                world_x0 + draw_w,
+                world_y0 + draw_h,
+                world_x0,
+                world_y0 + draw_h,
+            ),
+            "#94a3b8",
+            preset["line"],
+        )
+
+        draw_dashed_line(
+            draw,
+            (
+                world_x0,
+                world_y0 + draw_h,
+                world_x0,
+                world_y0,
+            ),
+            "#94a3b8",
+            preset["line"],
+        )
+
+    draw.rounded_rectangle(
+        (
+            pallet_x,
+            pallet_y,
+            pallet_x
+            + pallet_w * scale,
+            pallet_y
+            + pallet_l * scale,
+        ),
+        radius=max(
+            5,
+            preset["line"] * 2,
+        ),
+        fill="#f8fafc",
+        outline="#334155",
+        width=max(
+            3,
+            int(
+                preset["line"]
+                * 1.4
+            ),
+        ),
+    )
+
+    color_map = {
+        "A": {
+            "fill": "#f2dfbd",
+            "stroke": "#9a5b13",
+            "text": "#5f370e",
+        },
+        "B": {
+            "fill": "#d8e6f2",
+            "stroke": "#2f5f85",
+            "text": "#1f415e",
+        },
+    }
+
+    for p in layout[
+        "PLACEMENTS"
+    ]:
+        x = (
+            pallet_x
+            + p["x"]
+            * scale
+        )
+
+        y = (
+            pallet_y
+            + p["y"]
+            * scale
+        )
+
+        w = (
+            p["w"]
+            * scale
+        )
+
+        h = (
+            p["l"]
+            * scale
+        )
+
+        c = color_map[
+            p["ROT"]
+        ]
+
+        draw.rounded_rectangle(
+            (
+                x,
+                y,
+                x + w,
+                y + h,
+            ),
+            radius=max(
+                3,
+                preset["line"],
+            ),
+            fill=c["fill"],
+            outline=c["stroke"],
+            width=max(
+                2,
+                int(
+                    preset["line"]
+                    * 0.7
+                ),
+            ),
+        )
+
+        available_font_size = int(
+            min(
+                preset["label"],
+                max(
+                    preset["small"],
+                    min(
+                        w / 6.0,
+                        h / 2.5,
+                    ),
+                ),
+            )
+        )
+
+        if (
+            w
+            >= available_font_size * 4
+            and h
+            >= available_font_size * 1.8
+        ):
+            font = load_export_font(
+                available_font_size,
+                bold=True,
+            )
+
+            pil_text_center(
+                draw,
+                (
+                    x + w / 2,
+                    y + h / 2,
+                ),
+                (
+                    f"{int(p['w'])}x"
+                    f"{int(p['l'])}"
+                ),
+                font,
+                c["text"],
+            )
+
+    dim_y = min(
+        canvas_h
+        - footer_h
+        + preset["label"],
+        pallet_y
+        + pallet_l
+        * scale
+        + preset["label"]
+        * 1.8,
+    )
+
+    pil_text_center(
+        draw,
+        (
+            pallet_x
+            + pallet_w
+            * scale
+            / 2,
+            dim_y,
+        ),
+        f"Pallet W {pallet_w:.0f} mm",
+        label_font,
+        "#334155",
+    )
+
+    # Rotated left dimension label.
+    dim_text = (
+        f"Pallet L "
+        f"{pallet_l:.0f} mm"
+    )
+
+    bbox = pil_text_bbox(
+        draw,
+        dim_text,
+        label_font,
+    )
+
+    temp_w = max(
+        bbox[2] - bbox[0] + 24,
+        40,
+    )
+
+    temp_h = max(
+        bbox[3] - bbox[1] + 24,
+        40,
+    )
+
+    temp = Image.new(
+        "RGBA",
+        (
+            temp_w,
+            temp_h,
+        ),
+        (255, 255, 255, 0),
+    )
+
+    td = ImageDraw.Draw(
+        temp
+    )
+
+    td.text(
+        (
+            12,
+            10,
+        ),
+        dim_text,
+        font=label_font,
+        fill="#334155",
+    )
+
+    temp = temp.rotate(
+        90,
+        expand=True,
+    )
+
+    image.paste(
+        temp,
+        (
+            max(
+                int(
+                    pallet_x
+                    - temp.width
+                    - preset["label"]
+                ),
+                8,
+            ),
+            int(
+                pallet_y
+                + pallet_l
+                * scale
+                / 2
+                - temp.height
+                / 2
+            ),
+        ),
+        temp,
+    )
+
+    if include_footer:
+        footer_1, footer_2 = (
+            export_footer_lines(
+                scenario,
+                layout,
+                carton_count,
+            )
+        )
+
+        line_y = (
+            canvas_h
+            - footer_h
+        )
+
+        draw.line(
+            (
+                margin_x,
+                line_y,
+                canvas_w
+                - margin_x,
+                line_y,
+            ),
+            fill="#cbd5e1",
+            width=2,
+        )
+
+        draw.text(
+            (
+                margin_x,
+                line_y
+                + preset["small"]
+                * 0.9,
+            ),
+            footer_1,
+            font=small_font,
+            fill="#334155",
+        )
+
+        draw.text(
+            (
+                margin_x,
+                line_y
+                + preset["small"]
+                * 2.5,
+            ),
+            footer_2,
+            font=small_font,
+            fill="#334155",
+        )
+
+        pil_text_right(
+            draw,
+            (
+                canvas_w
+                - margin_x,
+                line_y
+                + preset["small"]
+                * 2.5,
+            ),
+            "Engineering visualization reference",
+            small_font,
+            "#64748b",
+        )
+
+    output = io.BytesIO()
+
+    image.save(
+        output,
+        format="PNG",
+        optimize=True,
+    )
+
+    return output.getvalue()
+
+
+def export_elevation_view_specs(
+    mode,
+):
+    if mode == "Front Only":
+        return [
+            (
+                "front",
+                pallet_w,
+                "Front View - Pallet Width Axis",
+                "Pallet Width",
+            )
+        ]
+
+    if mode == "Side Only":
+        return [
+            (
+                "side",
+                pallet_l,
+                "Side View - Pallet Length Axis",
+                "Pallet Length",
+            )
+        ]
+
+    return [
+        (
+            "front",
+            pallet_w,
+            "Front View - Pallet Width Axis",
+            "Pallet Width",
+        ),
+        (
+            "side",
+            pallet_l,
+            "Side View - Pallet Length Axis",
+            "Pallet Length",
+        ),
+    ]
+
+
+def elevation_export_geometry(
+    layout,
+    carton_count,
+    box_vertical_h,
+    preset_name,
+    include_footer,
+    mode,
+):
+    preset = EXPORT_PRESETS[
+        preset_name
+    ]
+
+    canvas_w = preset["width"]
+    canvas_h = preset["height"]
+
+    views = export_elevation_view_specs(
+        mode
+    )
+
+    header_h = int(
+        canvas_h * 0.15
+    )
+
+    footer_h = (
+        int(
+            canvas_h * 0.13
+        )
+        if include_footer
+        else int(
+            canvas_h * 0.035
+        )
+    )
+
+    margin_x = int(
+        canvas_w * 0.065
+    )
+
+    plot_top = header_h
+    plot_bottom = (
+        canvas_h
+        - footer_h
+    )
+
+    plot_h = (
+        plot_bottom
+        - plot_top
+    )
+
+    horizontal_gap_px = (
+        int(
+            canvas_w * 0.055
+        )
+        if len(views) > 1
+        else 0
+    )
+
+    total_world_width = sum(
+        dim
+        + 2
+        * overhang_allowance
+        for _, dim, _, _
+        in views
+    )
+
+    horizontal_space = (
+        canvas_w
+        - 2 * margin_x
+        - horizontal_gap_px
+        * max(
+            len(views) - 1,
+            0,
+        )
+    )
+
+    scale = min(
+        horizontal_space
+        / max(
+            total_world_width,
+            1.0,
+        ),
+        plot_h
+        / max(
+            max_total_height,
+            1.0,
+        ),
+    )
+
+    world_h_px = (
+        max_total_height
+        * scale
+    )
+
+    plot_y = (
+        plot_top
+        + (
+            plot_h
+            - world_h_px
+        )
+        / 2.0
+    )
+
+    view_data = []
+    x_cursor = margin_x
+
+    for (
+        view_type,
+        horizontal_dim,
+        title,
+        axis_label,
+    ) in views:
+        allowed_dim = (
+            horizontal_dim
+            + 2
+            * overhang_allowance
+        )
+
+        view_width_px = (
+            allowed_dim
+            * scale
+        )
+
+        group_x = x_cursor
+        pallet_x = (
+            group_x
+            + overhang_allowance
+            * scale
+        )
+
+        view_data.append(
+            {
+                "view_type": view_type,
+                "horizontal_dim": horizontal_dim,
+                "title": title,
+                "axis_label": axis_label,
+                "group_x": group_x,
+                "pallet_x": pallet_x,
+                "view_width_px": view_width_px,
+            }
+        )
+
+        x_cursor += (
+            view_width_px
+            + horizontal_gap_px
+        )
+
+    return {
+        "preset": preset,
+        "canvas_w": canvas_w,
+        "canvas_h": canvas_h,
+        "header_h": header_h,
+        "footer_h": footer_h,
+        "margin_x": margin_x,
+        "plot_top": plot_top,
+        "plot_bottom": plot_bottom,
+        "plot_y": plot_y,
+        "scale": scale,
+        "world_h_px": world_h_px,
+        "views": view_data,
+        "layers": build_display_stack(
+            layout,
+            carton_count,
+        ),
+        "displayed_height": (
+            pallet_h
+            + len(
+                build_display_stack(
+                    layout,
+                    carton_count,
+                )
+            )
+            * box_vertical_h
+            if carton_count > 0
+            else pallet_h
+        ),
+    }
+
+
+def smart_grid_step():
+    if max_total_height <= 1200:
+        return 200.0
+
+    if max_total_height <= 2500:
+        return 250.0
+
+    if max_total_height <= 5000:
+        return 500.0
+
+    return 1000.0
+
+
+def generate_export_elevation_svg(
+    scenario,
+    layout,
+    carton_count,
+    preset_name,
+    include_footer,
+    mode,
+):
+    geo = elevation_export_geometry(
+        layout,
+        carton_count,
+        scenario["GROUP"]["BOX_VERTICAL_H"],
+        preset_name,
+        include_footer,
+        mode,
+    )
+
+    preset = geo[
+        "preset"
+    ]
+
+    canvas_w = geo[
+        "canvas_w"
+    ]
+
+    canvas_h = geo[
+        "canvas_h"
+    ]
+
+    scale = geo[
+        "scale"
+    ]
+
+    plot_y = geo[
+        "plot_y"
+    ]
+
+    layers = geo[
+        "layers"
+    ]
+
+    displayed_height = geo[
+        "displayed_height"
+    ]
+
+    def y_of(z):
+        return (
+            plot_y
+            + (
+                max_total_height
+                - z
+            )
+            * scale
+        )
+
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'width="{canvas_w}" height="{canvas_h}" '
+        f'viewBox="0 0 {canvas_w} {canvas_h}">'
+        f'<rect x="0" y="0" width="{canvas_w}" height="{canvas_h}" fill="#ffffff"/>'
+    )
+
+    svg += (
+        f'<text x="{canvas_w/2}" y="{preset["title"] + 16}" '
+        f'font-family="DejaVu Sans,Arial,sans-serif" '
+        f'font-size="{preset["title"]}" font-weight="700" '
+        f'fill="#111827" text-anchor="middle">'
+        f'Engineering Elevation</text>'
+    )
+
+    subtitle = (
+        f"{carton_count} cartons | "
+        f"{layout['STRATEGY']} | "
+        f"{scenario['GROUP']['UP_AXIS']}-Up | "
+        f"Load H {displayed_height:.0f} mm / "
+        f"Limit {max_total_height:.0f} mm"
+    )
+
+    svg += (
+        f'<text x="{canvas_w/2}" '
+        f'y="{preset["title"] + preset["subtitle"] + 36}" '
+        f'font-family="DejaVu Sans,Arial,sans-serif" '
+        f'font-size="{preset["subtitle"]}" fill="#475569" '
+        f'text-anchor="middle">{svg_escape(subtitle)}</text>'
+    )
+
+    grid_step = smart_grid_step()
+
+    fill_by_rot = {
+        "A": "#e8d9b8",
+        "B": "#d8e4eb",
+    }
+
+    for view in geo[
+        "views"
+    ]:
+        group_x = view[
+            "group_x"
+        ]
+
+        pallet_x = view[
+            "pallet_x"
+        ]
+
+        horizontal_dim = view[
+            "horizontal_dim"
+        ]
+
+        view_width_px = view[
+            "view_width_px"
+        ]
+
+        svg += (
+            f'<text x="{group_x + view_width_px/2}" '
+            f'y="{geo["plot_top"] - preset["small"]*0.5}" '
+            f'font-family="DejaVu Sans,Arial,sans-serif" '
+            f'font-size="{preset["label"]}" font-weight="700" '
+            f'fill="#111827" text-anchor="middle">'
+            f'{svg_escape(view["title"])}</text>'
+        )
+
+        z = 0.0
+
+        while z <= max_total_height + EPS:
+            y = y_of(z)
+
+            svg += (
+                f'<line x1="{group_x}" y1="{y}" '
+                f'x2="{group_x + view_width_px}" y2="{y}" '
+                f'stroke="#e5e7eb" stroke-width="1.5"/>'
+            )
+
+            if z > 0:
+                svg += (
+                    f'<text x="{group_x-10}" y="{y+6}" '
+                    f'font-family="DejaVu Sans,Arial,sans-serif" '
+                    f'font-size="{preset["small"]}" fill="#64748b" '
+                    f'text-anchor="end">{int(z)}</text>'
+                )
+
+            z += grid_step
+
+        # Height limit.
+        limit_y = y_of(
+            max_total_height
+        )
+
+        svg += (
+            f'<line x1="{group_x}" y1="{limit_y}" '
+            f'x2="{group_x + view_width_px}" y2="{limit_y}" '
+            f'stroke="#dc2626" stroke-width="{preset["line"]}" '
+            f'stroke-dasharray="18,10"/>'
+        )
+
+        # Physical pallet.
+        pallet_y = y_of(
+            pallet_h
+        )
+
+        svg += (
+            f'<rect x="{pallet_x}" y="{pallet_y}" '
+            f'width="{horizontal_dim*scale}" '
+            f'height="{pallet_h*scale}" '
+            f'fill="#cbd5e1" stroke="#475569" '
+            f'stroke-width="{max(2,preset["line"]*0.75)}"/>'
+        )
+
+        for (
+            layer_idx,
+            layer_positions,
+        ) in enumerate(
+            layers
+        ):
+            z_bottom = (
+                pallet_h
+                + layer_idx
+                * scenario[
+                    "GROUP"
+                ][
+                    "BOX_VERTICAL_H"
+                ]
+            )
+
+            z_top = (
+                z_bottom
+                + scenario[
+                    "GROUP"
+                ][
+                    "BOX_VERTICAL_H"
+                ]
+            )
+
+            rect_y = y_of(
+                z_top
+            )
+
+            visible_segments = (
+                visible_face_segments(
+                    layer_positions,
+                    view[
+                        "view_type"
+                    ],
+                )
+            )
+
+            for segment in visible_segments:
+                x = (
+                    pallet_x
+                    + segment[
+                        "start"
+                    ]
+                    * scale
+                )
+
+                width = (
+                    (
+                        segment[
+                            "end"
+                        ]
+                        - segment[
+                            "start"
+                        ]
+                    )
+                    * scale
+                )
+
+                fill = fill_by_rot.get(
+                    segment[
+                        "rot"
+                    ],
+                    "#e6dcc8",
+                )
+
+                svg += (
+                    f'<rect x="{x}" y="{rect_y}" '
+                    f'width="{width}" '
+                    f'height="{scenario["GROUP"]["BOX_VERTICAL_H"]*scale}" '
+                    f'fill="{fill}" stroke="#4b5563" '
+                    f'stroke-width="{max(1.5,preset["line"]*0.55)}"/>'
+                )
+
+        load_y = y_of(
+            displayed_height
+        )
+
+        svg += (
+            f'<line x1="{group_x}" y1="{load_y}" '
+            f'x2="{group_x + view_width_px}" y2="{load_y}" '
+            f'stroke="#15803d" stroke-width="{preset["line"]}"/>'
+        )
+
+        svg += (
+            f'<text x="{group_x + view_width_px - 5}" '
+            f'y="{load_y - 10}" '
+            f'font-family="DejaVu Sans,Arial,sans-serif" '
+            f'font-size="{preset["small"]}" font-weight="700" '
+            f'fill="#166534" text-anchor="end">'
+            f'Load {displayed_height:.0f} mm</text>'
+        )
+
+        ground_y = y_of(
+            0
+        )
+
+        svg += (
+            f'<line x1="{group_x}" y1="{ground_y}" '
+            f'x2="{group_x + view_width_px}" y2="{ground_y}" '
+            f'stroke="#0f172a" stroke-width="2"/>'
+        )
+
+        svg += (
+            f'<text x="{pallet_x + horizontal_dim*scale/2}" '
+            f'y="{ground_y + preset["label"]*1.55}" '
+            f'font-family="DejaVu Sans,Arial,sans-serif" '
+            f'font-size="{preset["label"]}" font-weight="700" '
+            f'fill="#334155" text-anchor="middle">'
+            f'{view["axis_label"]} {horizontal_dim:.0f} mm</text>'
+        )
+
+    if include_footer:
+        footer_1, footer_2 = (
+            export_footer_lines(
+                scenario,
+                layout,
+                carton_count,
+            )
+        )
+
+        footer_y = (
+            canvas_h
+            - geo[
+                "footer_h"
+            ]
+        )
+
+        svg += (
+            f'<line x1="{geo["margin_x"]}" y1="{footer_y}" '
+            f'x2="{canvas_w-geo["margin_x"]}" y2="{footer_y}" '
+            f'stroke="#cbd5e1" stroke-width="2"/>'
+        )
+
+        svg += (
+            f'<text x="{geo["margin_x"]}" '
+            f'y="{footer_y+preset["small"]*1.35}" '
+            f'font-family="DejaVu Sans,Arial,sans-serif" '
+            f'font-size="{preset["small"]}" fill="#334155">'
+            f'{svg_escape(footer_1)}</text>'
+        )
+
+        svg += (
+            f'<text x="{geo["margin_x"]}" '
+            f'y="{footer_y+preset["small"]*2.9}" '
+            f'font-family="DejaVu Sans,Arial,sans-serif" '
+            f'font-size="{preset["small"]}" fill="#334155">'
+            f'{svg_escape(footer_2)}</text>'
+        )
+
+    svg += "</svg>"
+
+    return svg
+
+
+def generate_export_elevation_png(
+    scenario,
+    layout,
+    carton_count,
+    preset_name,
+    include_footer,
+    mode,
+):
+    geo = elevation_export_geometry(
+        layout,
+        carton_count,
+        scenario["GROUP"]["BOX_VERTICAL_H"],
+        preset_name,
+        include_footer,
+        mode,
+    )
+
+    preset = geo[
+        "preset"
+    ]
+
+    canvas_w = geo[
+        "canvas_w"
+    ]
+
+    canvas_h = geo[
+        "canvas_h"
+    ]
+
+    image = Image.new(
+        "RGB",
+        (
+            canvas_w,
+            canvas_h,
+        ),
+        "white",
+    )
+
+    draw = ImageDraw.Draw(
+        image
+    )
+
+    title_font = load_export_font(
+        preset["title"],
+        bold=True,
+    )
+
+    subtitle_font = load_export_font(
+        preset["subtitle"],
+        bold=False,
+    )
+
+    label_font = load_export_font(
+        preset["label"],
+        bold=True,
+    )
+
+    small_font = load_export_font(
+        preset["small"],
+        bold=False,
+    )
+
+    small_bold_font = load_export_font(
+        preset["small"],
+        bold=True,
+    )
+
+    pil_text_center(
+        draw,
+        (
+            canvas_w / 2,
+            preset["title"] * 0.85,
+        ),
+        "Engineering Elevation",
+        title_font,
+        "#111827",
+    )
+
+    subtitle = (
+        f"{carton_count} cartons | "
+        f"{layout['STRATEGY']} | "
+        f"{scenario['GROUP']['UP_AXIS']}-Up | "
+        f"Load H {geo['displayed_height']:.0f} mm / "
+        f"Limit {max_total_height:.0f} mm"
+    )
+
+    pil_text_center(
+        draw,
+        (
+            canvas_w / 2,
+            preset["title"]
+            + preset["subtitle"]
+            * 1.35,
+        ),
+        subtitle,
+        subtitle_font,
+        "#475569",
+    )
+
+    scale = geo[
+        "scale"
+    ]
+
+    plot_y = geo[
+        "plot_y"
+    ]
+
+    def y_of(z):
+        return (
+            plot_y
+            + (
+                max_total_height
+                - z
+            )
+            * scale
+        )
+
+    fill_by_rot = {
+        "A": "#e8d9b8",
+        "B": "#d8e4eb",
+    }
+
+    grid_step = (
+        smart_grid_step()
+    )
+
+    for view in geo[
+        "views"
+    ]:
+        group_x = view[
+            "group_x"
+        ]
+
+        pallet_x = view[
+            "pallet_x"
+        ]
+
+        horizontal_dim = view[
+            "horizontal_dim"
+        ]
+
+        view_width_px = view[
+            "view_width_px"
+        ]
+
+        pil_text_center(
+            draw,
+            (
+                group_x
+                + view_width_px
+                / 2,
+                geo[
+                    "plot_top"
+                ]
+                - preset["small"]
+                * 0.75,
+            ),
+            view[
+                "title"
+            ],
+            label_font,
+            "#111827",
+        )
+
+        z = 0.0
+
+        while z <= max_total_height + EPS:
+            y = y_of(
+                z
+            )
+
+            draw.line(
+                (
+                    group_x,
+                    y,
+                    group_x
+                    + view_width_px,
+                    y,
+                ),
+                fill="#e5e7eb",
+                width=2,
+            )
+
+            if z > 0:
+                pil_text_right(
+                    draw,
+                    (
+                        group_x - 8,
+                        y
+                        - preset["small"]
+                        / 2,
+                    ),
+                    int(
+                        z
+                    ),
+                    small_font,
+                    "#64748b",
+                )
+
+            z += grid_step
+
+        limit_y = y_of(
+            max_total_height
+        )
+
+        draw_dashed_line(
+            draw,
+            (
+                group_x,
+                limit_y,
+                group_x
+                + view_width_px,
+                limit_y,
+            ),
+            "#dc2626",
+            preset["line"],
+        )
+
+        pallet_y = y_of(
+            pallet_h
+        )
+
+        draw.rectangle(
+            (
+                pallet_x,
+                pallet_y,
+                pallet_x
+                + horizontal_dim
+                * scale,
+                pallet_y
+                + pallet_h
+                * scale,
+            ),
+            fill="#cbd5e1",
+            outline="#475569",
+            width=max(
+                2,
+                int(
+                    preset["line"]
+                    * 0.75
+                ),
+            ),
+        )
+
+        for (
+            layer_idx,
+            layer_positions,
+        ) in enumerate(
+            geo[
+                "layers"
+            ]
+        ):
+            z_bottom = (
+                pallet_h
+                + layer_idx
+                * scenario[
+                    "GROUP"
+                ][
+                    "BOX_VERTICAL_H"
+                ]
+            )
+
+            z_top = (
+                z_bottom
+                + scenario[
+                    "GROUP"
+                ][
+                    "BOX_VERTICAL_H"
+                ]
+            )
+
+            rect_y = y_of(
+                z_top
+            )
+
+            segments = (
+                visible_face_segments(
+                    layer_positions,
+                    view[
+                        "view_type"
+                    ],
+                )
+            )
+
+            for segment in segments:
+                x = (
+                    pallet_x
+                    + segment[
+                        "start"
+                    ]
+                    * scale
+                )
+
+                width = (
+                    (
+                        segment[
+                            "end"
+                        ]
+                        - segment[
+                            "start"
+                        ]
+                    )
+                    * scale
+                )
+
+                rect_h = (
+                    scenario[
+                        "GROUP"
+                    ][
+                        "BOX_VERTICAL_H"
+                    ]
+                    * scale
+                )
+
+                draw.rectangle(
+                    (
+                        x,
+                        rect_y,
+                        x + width,
+                        rect_y
+                        + rect_h,
+                    ),
+                    fill=fill_by_rot.get(
+                        segment[
+                            "rot"
+                        ],
+                        "#e6dcc8",
+                    ),
+                    outline="#4b5563",
+                    width=max(
+                        1,
+                        int(
+                            preset["line"]
+                            * 0.55
+                        ),
+                    ),
+                )
+
+        load_y = y_of(
+            geo[
+                "displayed_height"
+            ]
+        )
+
+        draw.line(
+            (
+                group_x,
+                load_y,
+                group_x
+                + view_width_px,
+                load_y,
+            ),
+            fill="#15803d",
+            width=preset[
+                "line"
+            ],
+        )
+
+        pil_text_right(
+            draw,
+            (
+                group_x
+                + view_width_px
+                - 4,
+                load_y
+                - preset["small"]
+                * 1.25,
+            ),
+            (
+                f"Load "
+                f"{geo['displayed_height']:.0f} mm"
+            ),
+            small_bold_font,
+            "#166534",
+        )
+
+        ground_y = y_of(
+            0
+        )
+
+        draw.line(
+            (
+                group_x,
+                ground_y,
+                group_x
+                + view_width_px,
+                ground_y,
+            ),
+            fill="#0f172a",
+            width=2,
+        )
+
+        pil_text_center(
+            draw,
+            (
+                pallet_x
+                + horizontal_dim
+                * scale
+                / 2,
+                ground_y
+                + preset["label"]
+                * 1.2,
+            ),
+            (
+                f"{view['axis_label']} "
+                f"{horizontal_dim:.0f} mm"
+            ),
+            label_font,
+            "#334155",
+        )
+
+    if include_footer:
+        footer_1, footer_2 = (
+            export_footer_lines(
+                scenario,
+                layout,
+                carton_count,
+            )
+        )
+
+        line_y = (
+            canvas_h
+            - geo[
+                "footer_h"
+            ]
+        )
+
+        draw.line(
+            (
+                geo[
+                    "margin_x"
+                ],
+                line_y,
+                canvas_w
+                - geo[
+                    "margin_x"
+                ],
+                line_y,
+            ),
+            fill="#cbd5e1",
+            width=2,
+        )
+
+        draw.text(
+            (
+                geo[
+                    "margin_x"
+                ],
+                line_y
+                + preset["small"]
+                * 0.9,
+            ),
+            footer_1,
+            font=small_font,
+            fill="#334155",
+        )
+
+        draw.text(
+            (
+                geo[
+                    "margin_x"
+                ],
+                line_y
+                + preset["small"]
+                * 2.4,
+            ),
+            footer_2,
+            font=small_font,
+            fill="#334155",
+        )
+
+    output = io.BytesIO()
+
+    image.save(
+        output,
+        format="PNG",
+        optimize=True,
+    )
+
+    return output.getvalue()
+
+
+def export_signature(
+    scenario,
+    layout,
+    carton_count,
+    preset_name,
+    include_footer,
+    elevation_mode,
+):
+    placement_sig = tuple(
+        sorted(
+            (
+                round(
+                    p["x"],
+                    3,
+                ),
+                round(
+                    p["y"],
+                    3,
+                ),
+                round(
+                    p["w"],
+                    3,
+                ),
+                round(
+                    p["l"],
+                    3,
+                ),
+                p[
+                    "ROT"
+                ],
+            )
+            for p in layout[
+                "PLACEMENTS"
+            ]
+        )
+    )
+
+    return (
+        scenario[
+            "GROUP"
+        ][
+            "UP_AXIS"
+        ],
+        layout[
+            "STRATEGY"
+        ],
+        int(
+            carton_count
+        ),
+        preset_name,
+        bool(
+            include_footer
+        ),
+        elevation_mode,
+        round(
+            box_w,
+            3,
+        ),
+        round(
+            box_l,
+            3,
+        ),
+        round(
+            box_h,
+            3,
+        ),
+        round(
+            pallet_w,
+            3,
+        ),
+        round(
+            pallet_l,
+            3,
+        ),
+        round(
+            pallet_h,
+            3,
+        ),
+        round(
+            max_total_height,
+            3,
+        ),
+        round(
+            box_weight,
+            3,
+        ),
+        round(
+            pallet_tare_weight,
+            3,
+        ),
+        placement_sig,
+    )
+
+
+def prepare_export_bundle(
+    scenario,
+    layout,
+    carton_count,
+    preset_name,
+    include_footer,
+    elevation_mode,
+):
+    top_svg = (
+        generate_export_top_svg(
+            scenario,
+            layout,
+            carton_count,
+            preset_name,
+            include_footer,
+        )
+        .encode(
+            "utf-8"
+        )
+    )
+
+    elevation_svg = (
+        generate_export_elevation_svg(
+            scenario,
+            layout,
+            carton_count,
+            preset_name,
+            include_footer,
+            elevation_mode,
+        )
+        .encode(
+            "utf-8"
+        )
+    )
+
+    return {
+        "top_png": (
+            generate_export_top_png(
+                scenario,
+                layout,
+                carton_count,
+                preset_name,
+                include_footer,
+            )
+        ),
+        "top_svg": top_svg,
+        "elevation_png": (
+            generate_export_elevation_png(
+                scenario,
+                layout,
+                carton_count,
+                preset_name,
+                include_footer,
+                elevation_mode,
+            )
+        ),
+        "elevation_svg": elevation_svg,
+    }
+
+
+def render_export_center(
+    scenario,
+    layout,
+    carton_count,
+    key_prefix,
+):
+    with st.expander(
+        "📤 Export Engineering Output",
+        expanded=False,
+    ):
+        st.caption(
+            "V0.3A สร้างไฟล์เฉพาะเมื่อกด Prepare Export Files "
+            "เพื่อไม่ให้การปรับ Input และหมุนดู 3D ช้าลง"
+        )
+
+        c1, c2 = st.columns(
+            2
+        )
+
+        with c1:
+            preset_name = (
+                st.selectbox(
+                    "Output Size",
+                    list(
+                        EXPORT_PRESETS.keys()
+                    ),
+                    index=1,
+                    key=(
+                        f"{key_prefix}"
+                        "_export_preset"
+                    ),
+                )
+            )
+
+        with c2:
+            elevation_mode = (
+                st.selectbox(
+                    "Elevation Export",
+                    [
+                        "Front + Side",
+                        "Front Only",
+                        "Side Only",
+                    ],
+                    index=0,
+                    key=(
+                        f"{key_prefix}"
+                        "_export_elevation_mode"
+                    ),
+                )
+            )
+
+        include_footer = st.checkbox(
+            "Include Engineering Footer",
+            value=True,
+            key=(
+                f"{key_prefix}"
+                "_export_footer"
+            ),
+        )
+
+        preset = (
+            EXPORT_PRESETS[
+                preset_name
+            ]
+        )
+
+        st.caption(
+            f"PNG canvas: "
+            f"{preset['width']} × "
+            f"{preset['height']} px • "
+            "SVG remains vector-scalable • "
+            "Export typography is intentionally larger than on-screen UI"
+        )
+
+        current_signature = (
+            export_signature(
+                scenario,
+                layout,
+                carton_count,
+                preset_name,
+                include_footer,
+                elevation_mode,
+            )
+        )
+
+        state_key = (
+            f"{key_prefix}"
+            "_prepared_exports"
+        )
+
+        if st.button(
+            "🛠️ Prepare Export Files",
+            key=(
+                f"{key_prefix}"
+                "_prepare_export"
+            ),
+            use_container_width=True,
+        ):
+            with st.spinner(
+                "Preparing PNG / SVG..."
+            ):
+                bundle = (
+                    prepare_export_bundle(
+                        scenario,
+                        layout,
+                        carton_count,
+                        preset_name,
+                        include_footer,
+                        elevation_mode,
+                    )
+                )
+
+            st.session_state[
+                state_key
+            ] = {
+                "signature": current_signature,
+                "bundle": bundle,
+            }
+
+        prepared = (
+            st.session_state.get(
+                state_key
+            )
+        )
+
+        if prepared:
+            if (
+                prepared[
+                    "signature"
+                ]
+                != current_signature
+            ):
+                st.warning(
+                    "⚠️ Input / Layout / Export settings เปลี่ยนจากไฟล์ที่เตรียมไว้ "
+                    "กรุณากด Prepare Export Files อีกครั้ง"
+                )
+            else:
+                bundle = prepared[
+                    "bundle"
+                ]
+
+                top_png_name = (
+                    build_export_filename(
+                        "PalletPattern",
+                        scenario,
+                        layout,
+                        carton_count,
+                        "png",
+                    )
+                )
+
+                top_svg_name = (
+                    build_export_filename(
+                        "PalletPattern",
+                        scenario,
+                        layout,
+                        carton_count,
+                        "svg",
+                    )
+                )
+
+                elevation_kind = (
+                    "PalletElevation-"
+                    + safe_filename_part(
+                        elevation_mode
+                    )
+                )
+
+                elevation_png_name = (
+                    build_export_filename(
+                        elevation_kind,
+                        scenario,
+                        layout,
+                        carton_count,
+                        "png",
+                    )
+                )
+
+                elevation_svg_name = (
+                    build_export_filename(
+                        elevation_kind,
+                        scenario,
+                        layout,
+                        carton_count,
+                        "svg",
+                    )
+                )
+
+                st.success(
+                    "✅ Export files ready"
+                )
+
+                d1, d2 = st.columns(
+                    2
+                )
+
+                with d1:
+                    st.markdown(
+                        "**Smart Layer Pattern**"
+                    )
+
+                    st.download_button(
+                        "⬇️ PNG — Layer Pattern",
+                        data=bundle[
+                            "top_png"
+                        ],
+                        file_name=top_png_name,
+                        mime="image/png",
+                        use_container_width=True,
+                        key=(
+                            f"{key_prefix}"
+                            "_download_top_png"
+                        ),
+                    )
+
+                    st.download_button(
+                        "⬇️ SVG — Layer Pattern",
+                        data=bundle[
+                            "top_svg"
+                        ],
+                        file_name=top_svg_name,
+                        mime="image/svg+xml",
+                        use_container_width=True,
+                        key=(
+                            f"{key_prefix}"
+                            "_download_top_svg"
+                        ),
+                    )
+
+                with d2:
+                    st.markdown(
+                        "**Engineering Elevation**"
+                    )
+
+                    st.download_button(
+                        "⬇️ PNG — Elevation",
+                        data=bundle[
+                            "elevation_png"
+                        ],
+                        file_name=elevation_png_name,
+                        mime="image/png",
+                        use_container_width=True,
+                        key=(
+                            f"{key_prefix}"
+                            "_download_elev_png"
+                        ),
+                    )
+
+                    st.download_button(
+                        "⬇️ SVG — Elevation",
+                        data=bundle[
+                            "elevation_svg"
+                        ],
+                        file_name=elevation_svg_name,
+                        mime="image/svg+xml",
+                        use_container_width=True,
+                        key=(
+                            f"{key_prefix}"
+                            "_download_elev_svg"
+                        ),
+                    )
+
+        st.info(
+            "🧊 Professional 3D Render Export จะอยู่ใน V0.3B; "
+            "V0.3A intentionally ไม่สร้าง 3D export ระหว่าง interaction "
+            "เพื่อรักษาความเร็วของ App"
+        )
+
 # =========================================================
 # DISPLAY HELPERS
 # =========================================================
@@ -2923,6 +5500,13 @@ def render_scenario(
             "ไม่ใช่ Packaging requirement recommendation"
         )
 
+    render_export_center(
+        scenario,
+        display_layout,
+        display_count,
+        key_prefix,
+    )
+
 
 # =========================================================
 # WORKING CONDITION SUMMARY
@@ -2997,7 +5581,7 @@ total_layouts = sum(
 )
 
 st.caption(
-    f"V0.2.1 evaluated {total_layouts} unique floor layouts "
+    f"V0.3A evaluated {total_layouts} unique floor layouts "
     "from Simple Grid, Mixed Rows, Mixed Columns"
     + (
         ", Residual L-Fill"
@@ -3424,7 +6008,7 @@ with st.expander(
 ):
     st.markdown(
         """
-        **V0.2.1 Visualization & Performance Update**
+        **V0.3A Export Foundation**
 
         - **Smart Floor Solver ใช้ Logic เดิมจาก V0.2** และยังประเมิน Floor Pattern หลาย Strategy ภายใน Up Orientation เดียวกัน:
           **Simple Grid, Mixed Rows, Mixed Columns และ Residual L-Fill**.
@@ -3445,6 +6029,10 @@ with st.expander(
         - Carton Area Coverage สามารถเกิน 100% ได้เมื่อเปิด Overhang; จึงมี
           Actual carton area / allowed footprint แสดงแยกในรายละเอียด.
         - Engineering Elevation ใช้ **True relative physical scale** สำหรับ W / L / H และใช้ visible-face projection เพื่อตัด hidden rear edges.
+        - เพิ่ม **Document-ready Export** สำหรับ Smart Layer Pattern และ Engineering Elevation เป็น PNG / SVG.
+        - PNG มี Output Preset และ Typography ที่ออกแบบให้ยังอ่านได้เมื่อวางใน Word / PowerPoint / WI.
+        - Export files จะสร้างเฉพาะเมื่อผู้ใช้กด **Prepare Export Files** เพื่อลด rerun cost.
+        - Engineering Elevation Export เลือกได้ Front + Side, Front Only หรือ Side Only.
         - Lightweight 3D รวม carton meshes / edges เป็น grouped traces, ใช้ orthographic camera และ render เฉพาะเมื่อผู้ใช้เลือก 3D View.
         - 3D Corner Guards / Straps เป็น **Illustration only** ไม่ใช่ระบบคำนวณหรือ Recommendation.
         - V0.2 ยังไม่พิจารณา Compression Strength, Box Stacking Strength,
