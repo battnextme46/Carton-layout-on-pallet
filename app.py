@@ -2,7 +2,6 @@
 import math
 from itertools import combinations
 
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -10,7 +9,7 @@ import streamlit as st
 # =========================================================
 # PAGE CONFIG
 # =========================================================
-APP_VERSION = "V0.2"
+APP_VERSION = "V0.2.1"
 MODULE_NAME = "Module 02 — Carton Palletizing Optimizer"
 EPS = 1e-9
 MAX_EXHAUSTIVE_PARTIAL_COMBINATIONS = 50000
@@ -75,7 +74,7 @@ st.markdown(
 st.title("📦 Carton Palletizing Layout Optimizer")
 st.caption(
     f"{APP_VERSION} • NPI Packaging Engineering Toolkit • {MODULE_NAME} "
-    "— Smart Floor Optimizer / Orientation-aware / Weight-aware / Adaptive Result UI"
+    "— V0.2 Solver + True-scale Engineering View + Lightweight 3D + Performance Update"
 )
 
 
@@ -240,8 +239,8 @@ prefer_simple_on_safe_tie = st.sidebar.checkbox(
 )
 
 st.sidebar.caption(
-    "V0.2 สามารถหมุนกล่องบนพื้น 90° ภายใน Up Orientation เดียวกันได้ "
-    "โดยไม่ถือว่าเป็นการเปลี่ยน H-Up / L-Up / W-Up"
+    "V0.2.1 ใช้ Smart Floor Solver เดิมจาก V0.2 และปรับ Visualization / Performance "
+    "โดยการหมุนกล่องบนพื้น 90° ยังไม่ถือว่าเป็นการเปลี่ยน H-Up / L-Up / W-Up"
 )
 
 
@@ -1325,20 +1324,83 @@ def practical_candidate_key(item):
 
 
 # =========================================================
-# BUILD UP-ORIENTATION SCENARIOS
+# BUILD UP-ORIENTATION SCENARIOS — CACHED V0.2 SOLVER
 # =========================================================
-scenarios = []
-
-for group in ORIENTATION_GROUPS:
-    floor_candidates = generate_floor_candidates(
-        group
+def group_cache_tuple(group):
+    return (
+        group["UP_AXIS"],
+        group["ALLOWED"],
+        group["NORMAL"],
+        group["LABEL"],
+        group["A_NAME"],
+        float(group["A_W"]),
+        float(group["A_L"]),
+        group["B_NAME"],
+        float(group["B_W"]),
+        float(group["B_L"]),
+        float(group["BOX_VERTICAL_H"]),
     )
 
+
+def group_from_cache_tuple(values):
+    (
+        up_axis,
+        allowed,
+        normal,
+        label,
+        a_name,
+        a_w,
+        a_l,
+        b_name,
+        b_w,
+        b_l,
+        box_vertical_h,
+    ) = values
+
+    return {
+        "UP_AXIS": up_axis,
+        "ALLOWED": allowed,
+        "NORMAL": normal,
+        "LABEL": label,
+        "A_NAME": a_name,
+        "A_W": a_w,
+        "A_L": a_l,
+        "B_NAME": b_name,
+        "B_W": b_w,
+        "B_L": b_l,
+        "BOX_VERTICAL_H": box_vertical_h,
+    }
+
+
+@st.cache_data(show_spinner=False)
+def solve_group_cached(
+    group_values,
+    pallet_w_key,
+    pallet_l_key,
+    pallet_h_key,
+    max_total_height_key,
+    available_cargo_height_key,
+    box_weight_key,
+    pallet_tare_weight_key,
+    max_pallet_gross_weight_key,
+    box_tolerance_key,
+    overhang_allowance_key,
+    advanced_residual_search_key,
+    prefer_simple_on_safe_tie_key,
+):
+    """
+    Cache boundary for the unchanged V0.2 Smart Floor Solver.
+
+    The *_key arguments intentionally participate in Streamlit's cache key.
+    The geometry functions use the matching current-run globals, so a cached
+    result is reused only when every solver-relevant engineering input matches.
+    """
+    group = group_from_cache_tuple(group_values)
+
+    floor_candidates = generate_floor_candidates(group)
+
     evaluated = [
-        candidate_metrics(
-            group,
-            candidate,
-        )
+        candidate_metrics(group, candidate)
         for candidate in floor_candidates
     ]
 
@@ -1357,14 +1419,34 @@ for group in ORIENTATION_GROUPS:
         key=practical_candidate_key,
     )
 
+    return {
+        "GROUP": group,
+        "EVALUATED": evaluated,
+        "GEOMETRY_BEST": geometry_best,
+        "PRACTICAL_BEST": practical_best,
+        "LAYOUT_COUNT": len(evaluated),
+    }
+
+
+scenarios = []
+
+for group in ORIENTATION_GROUPS:
     scenarios.append(
-        {
-            "GROUP": group,
-            "EVALUATED": evaluated,
-            "GEOMETRY_BEST": geometry_best,
-            "PRACTICAL_BEST": practical_best,
-            "LAYOUT_COUNT": len(evaluated),
-        }
+        solve_group_cached(
+            group_cache_tuple(group),
+            float(pallet_w),
+            float(pallet_l),
+            float(pallet_h),
+            float(max_total_height),
+            float(available_cargo_height),
+            float(box_weight),
+            float(pallet_tare_weight),
+            float(max_pallet_gross_weight),
+            float(box_tolerance),
+            float(overhang_allowance),
+            bool(advanced_residual_search),
+            bool(prefer_simple_on_safe_tie),
+        )
     )
 
 
@@ -1746,276 +1828,467 @@ def generate_svg_layer(
 
 
 # =========================================================
-# VISUALIZATION — SIDE VIEWS
+# VISUALIZATION — TRUE-SCALE ENGINEERING ELEVATION (SVG)
 # =========================================================
-def projected_intervals(
-    layer_positions,
-    axis,
-):
-    if axis == "x":
-        values = [
-            (
-                round(p["x"], 6),
-                round(p["w"], 6),
-            )
-            for p in layer_positions
-        ]
-    else:
-        values = [
-            (
-                round(p["y"], 6),
-                round(p["l"], 6),
-            )
-            for p in layer_positions
-        ]
+def visible_face_segments(layer_positions, view_type):
+    """
+    Hidden-line-aware orthographic projection.
 
-    return sorted(
-        set(values)
+    Front view looks from negative Y toward +Y and uses X horizontally.
+    Side view looks from negative X toward +X and uses Y horizontally.
+    Only the nearest carton face is drawn for every visible horizontal span.
+    This prevents rear carton edges from being drawn on top of the front row.
+    """
+    if not layer_positions:
+        return []
+
+    prepared = []
+
+    for idx, p in enumerate(layer_positions):
+        if view_type == "front":
+            start = p["x"]
+            end = p["x"] + p["w"]
+            depth = p["y"]
+        else:
+            start = p["y"]
+            end = p["y"] + p["l"]
+            depth = p["x"]
+
+        prepared.append(
+            {
+                "id": idx,
+                "start": start,
+                "end": end,
+                "depth": depth,
+                "rot": p["ROT"],
+            }
+        )
+
+    boundaries = sorted(
+        {
+            round(v, 6)
+            for item in prepared
+            for v in (item["start"], item["end"])
+        }
     )
 
+    segments = []
 
-def generate_2d_side_view(
+    for i in range(len(boundaries) - 1):
+        a = boundaries[i]
+        b = boundaries[i + 1]
+
+        if b - a <= EPS:
+            continue
+
+        mid = (a + b) / 2.0
+
+        covering = [
+            item
+            for item in prepared
+            if item["start"] - EPS <= mid <= item["end"] + EPS
+        ]
+
+        if not covering:
+            continue
+
+        visible = min(
+            covering,
+            key=lambda item: (item["depth"], item["id"]),
+        )
+
+        if (
+            segments
+            and segments[-1]["id"] == visible["id"]
+            and abs(segments[-1]["end"] - a) <= 1e-5
+        ):
+            segments[-1]["end"] = b
+        else:
+            segments.append(
+                {
+                    "id": visible["id"],
+                    "start": a,
+                    "end": b,
+                    "rot": visible["rot"],
+                }
+            )
+
+    return segments
+
+
+def generate_true_scale_elevation_svg(
     layout,
     carton_count,
     box_vertical_h,
-    view_type,
 ):
-    layers = build_display_stack(
-        layout,
-        carton_count,
-    )
+    """
+    Front + Side engineering elevation in ONE SVG.
 
-    fig, ax = plt.subplots(
-        figsize=(8, 4.8)
-    )
+    Both views share the exact same SVG world scale, therefore 1 mm in W/L
+    uses the same graphical scale as 1 mm in H. This removes the distortion
+    caused by separate fixed-size Matplotlib canvases.
+    """
+    layers = build_display_stack(layout, carton_count)
 
-    if view_type == "front":
-        total_dim = pallet_w
-        axis_label = "Width (mm)"
-        title = "Front View — Pallet Width Axis"
-        axis = "x"
-    else:
-        total_dim = pallet_l
-        axis_label = "Length (mm)"
-        title = "Side View — Pallet Length Axis"
-        axis = "y"
-
-    ax.add_patch(
-        plt.Rectangle(
-            (0, 0),
-            total_dim,
-            pallet_h,
-            facecolor="#cbd5e1",
-            edgecolor="#475569",
-            linewidth=1.5,
-        )
-    )
-
-    ax.text(
-        total_dim / 2,
-        pallet_h / 2,
-        f"Pallet H: {int(pallet_h)} mm",
-        ha="center",
-        va="center",
-        fontsize=9,
-        fontweight="bold",
-    )
-
-    for layer_idx, layer_positions in enumerate(
-        layers
-    ):
-        z = (
-            pallet_h
-            + layer_idx * box_vertical_h
-        )
-
-        intervals = projected_intervals(
-            layer_positions,
-            axis,
-        )
-
-        for start, width in intervals:
-            ax.add_patch(
-                plt.Rectangle(
-                    (start, z),
-                    width,
-                    box_vertical_h,
-                    facecolor="#ffedd5",
-                    edgecolor="#ea580c",
-                    linewidth=1.2,
-                )
-            )
-
-    display_height = (
-        pallet_h
-        + len(layers) * box_vertical_h
+    displayed_height = (
+        pallet_h + len(layers) * box_vertical_h
         if layers
         else pallet_h
     )
 
-    ax.axhline(
-        y=max_total_height,
-        linestyle="--",
-        linewidth=2,
-        label=(
-            f"Height Limit "
-            f"({int(max_total_height)} mm)"
-        ),
+    side_margin = max(95.0, overhang_allowance + 60.0)
+    view_gap = 180.0
+    top_title = 135.0
+    bottom_space = 120.0
+
+    front_group_w = pallet_w + 2 * overhang_allowance
+    side_group_w = pallet_l + 2 * overhang_allowance
+
+    front_group_x = side_margin
+    front_pallet_x = front_group_x + overhang_allowance
+
+    side_group_x = (
+        front_group_x
+        + front_group_w
+        + view_gap
+    )
+    side_pallet_x = side_group_x + overhang_allowance
+
+    view_w = (
+        side_margin
+        + front_group_w
+        + view_gap
+        + side_group_w
+        + side_margin
     )
 
-    ax.axhline(
-        y=display_height,
-        linewidth=2,
-        label=(
-            f"Displayed Load Height "
-            f"({int(display_height)} mm)"
-        ),
+    view_h = top_title + max_total_height + bottom_space
+
+    svg = (
+        f'<svg width="100%" height="auto" '
+        f'viewBox="0 0 {view_w} {view_h}" '
+        f'xmlns="http://www.w3.org/2000/svg" '
+        f'style="background:#ffffff;border:2px solid #cbd5e1;'
+        f'border-radius:12px;">'
     )
 
-    margin = max(
-        60,
-        overhang_allowance + 30,
+    # Overall title / scale note.
+    svg += (
+        f'<text x="{view_w/2}" y="42" '
+        f'font-family="system-ui,sans-serif" font-size="30" '
+        f'font-weight="800" fill="#0f172a" text-anchor="middle">'
+        f'True-scale Engineering Elevation — 1:1 relative W / L / H scale'
+        f'</text>'
     )
 
-    ax.set_xlim(
-        -margin,
-        total_dim + margin,
+    svg += (
+        f'<text x="{view_w/2}" y="78" '
+        f'font-family="system-ui,sans-serif" font-size="20" '
+        f'fill="#475569" text-anchor="middle">'
+        f'Displayed load: {carton_count} cartons • Height {displayed_height:.0f} mm '
+        f'• Limit {max_total_height:.0f} mm'
+        f'</text>'
     )
 
-    ax.set_ylim(
-        0,
-        max_total_height
-        + max(
-            120,
-            box_vertical_h * 0.6,
-        ),
+    def world_y(z_top):
+        return top_title + (max_total_height - z_top)
+
+    def draw_view(
+        group_x,
+        pallet_x,
+        horizontal_dim,
+        view_type,
+        title,
+        axis_label,
+    ):
+        nonlocal svg
+
+        # Titles.
+        svg += (
+            f'<text x="{group_x + (horizontal_dim + 2*overhang_allowance)/2}" '
+            f'y="112" font-family="system-ui,sans-serif" font-size="25" '
+            f'font-weight="800" fill="#111827" text-anchor="middle">'
+            f'{title}</text>'
+        )
+
+        # Height grid every 250 mm to support engineering reading.
+        grid_step = 250.0
+        z = 0.0
+        while z <= max_total_height + EPS:
+            y = world_y(z)
+            svg += (
+                f'<line x1="{group_x}" y1="{y}" '
+                f'x2="{group_x + horizontal_dim + 2*overhang_allowance}" y2="{y}" '
+                f'stroke="#e2e8f0" stroke-width="1.4"/>'
+            )
+            if z > 0:
+                svg += (
+                    f'<text x="{group_x - 16}" y="{y + 7}" '
+                    f'font-family="system-ui,sans-serif" font-size="18" '
+                    f'fill="#64748b" text-anchor="end">{int(z)}</text>'
+                )
+            z += grid_step
+
+        # Max-height line.
+        limit_y = world_y(max_total_height)
+        svg += (
+            f'<line x1="{group_x}" y1="{limit_y}" '
+            f'x2="{group_x + horizontal_dim + 2*overhang_allowance}" y2="{limit_y}" '
+            f'stroke="#dc2626" stroke-width="4" stroke-dasharray="16,10"/>'
+        )
+        svg += (
+            f'<text x="{group_x + 8}" y="{limit_y + 28}" '
+            f'font-family="system-ui,sans-serif" font-size="18" '
+            f'font-weight="700" fill="#b91c1c">Height limit {max_total_height:.0f}</text>'
+        )
+
+        # Physical pallet.
+        pallet_y = world_y(pallet_h)
+        svg += (
+            f'<rect x="{pallet_x}" y="{pallet_y}" '
+            f'width="{horizontal_dim}" height="{pallet_h}" '
+            f'fill="#cbd5e1" stroke="#475569" stroke-width="3"/>'
+        )
+        svg += (
+            f'<text x="{pallet_x + horizontal_dim/2}" '
+            f'y="{pallet_y + pallet_h/2 + 7}" '
+            f'font-family="system-ui,sans-serif" font-size="19" '
+            f'font-weight="800" fill="#334155" text-anchor="middle">'
+            f'Pallet H {pallet_h:.0f} mm</text>'
+        )
+
+        fill_by_rot = {
+            "A": "#f2dfbd",
+            "B": "#e4dcc7",
+        }
+
+        for layer_idx, layer_positions in enumerate(layers):
+            z_bottom = pallet_h + layer_idx * box_vertical_h
+            z_top = z_bottom + box_vertical_h
+            y = world_y(z_top)
+
+            visible_segments = visible_face_segments(
+                layer_positions,
+                view_type,
+            )
+
+            for segment in visible_segments:
+                x = pallet_x + segment["start"]
+                width = segment["end"] - segment["start"]
+                fill = fill_by_rot.get(segment["rot"], "#efe3cc")
+
+                svg += (
+                    f'<rect x="{x}" y="{y}" width="{width}" '
+                    f'height="{box_vertical_h}" fill="{fill}" '
+                    f'stroke="#4b5563" stroke-width="2.2"/>'
+                )
+
+        # Displayed height line.
+        load_y = world_y(displayed_height)
+        svg += (
+            f'<line x1="{group_x}" y1="{load_y}" '
+            f'x2="{group_x + horizontal_dim + 2*overhang_allowance}" y2="{load_y}" '
+            f'stroke="#15803d" stroke-width="4"/>'
+        )
+        svg += (
+            f'<text x="{group_x + horizontal_dim + 2*overhang_allowance - 8}" '
+            f'y="{load_y - 12}" font-family="system-ui,sans-serif" '
+            f'font-size="18" font-weight="800" fill="#166534" text-anchor="end">'
+            f'Load {displayed_height:.0f} mm</text>'
+        )
+
+        # Ground / horizontal dimension labels.
+        ground_y = world_y(0)
+        svg += (
+            f'<line x1="{group_x}" y1="{ground_y}" '
+            f'x2="{group_x + horizontal_dim + 2*overhang_allowance}" y2="{ground_y}" '
+            f'stroke="#0f172a" stroke-width="2.5"/>'
+        )
+        svg += (
+            f'<text x="{pallet_x + horizontal_dim/2}" '
+            f'y="{ground_y + 48}" font-family="system-ui,sans-serif" '
+            f'font-size="22" font-weight="800" fill="#334155" text-anchor="middle">'
+            f'{axis_label}: {horizontal_dim:.0f} mm</text>'
+        )
+
+    draw_view(
+        front_group_x,
+        front_pallet_x,
+        pallet_w,
+        "front",
+        "Front View — Pallet Width Axis",
+        "Pallet Width",
     )
 
-    ax.set_title(title)
-    ax.set_xlabel(axis_label)
-    ax.set_ylabel("Height (mm)")
-    ax.grid(
-        axis="y",
-        linestyle=":",
-        alpha=0.55,
-    )
-    ax.legend(
-        loc="upper right"
+    draw_view(
+        side_group_x,
+        side_pallet_x,
+        pallet_l,
+        "side",
+        "Side View — Pallet Length Axis",
+        "Pallet Length",
     )
 
-    plt.tight_layout()
+    # Shared vertical dimension indication.
+    dim_x = 36.0
+    svg += (
+        f'<line x1="{dim_x}" y1="{world_y(max_total_height)}" '
+        f'x2="{dim_x}" y2="{world_y(0)}" stroke="#334155" stroke-width="3"/>'
+    )
+    svg += (
+        f'<text x="18" y="{top_title + max_total_height/2}" '
+        f'font-family="system-ui,sans-serif" font-size="22" font-weight="800" '
+        f'fill="#334155" text-anchor="middle" '
+        f'transform="rotate(-90,18,{top_title + max_total_height/2})">'
+        f'Height (mm)</text>'
+    )
 
-    return fig
+    svg += "</svg>"
+    return svg
 
 
 # =========================================================
-# PLOTLY 3D
+# PLOTLY 3D — LIGHTWEIGHT INDUSTRIAL VIEW
 # =========================================================
-def draw_plotly_cube(
+def cuboid_vertices_faces(cuboids):
+    xs, ys, zs = [], [], []
+    ii, jj, kk = [], [], []
+
+    faces = [
+        (0, 2, 1), (0, 3, 2),
+        (4, 5, 6), (4, 6, 7),
+        (0, 1, 5), (0, 5, 4),
+        (1, 2, 6), (1, 6, 5),
+        (2, 3, 7), (2, 7, 6),
+        (3, 0, 4), (3, 4, 7),
+    ]
+
+    for cuboid in cuboids:
+        x = cuboid["x"]
+        y = cuboid["y"]
+        z = cuboid["z"]
+        dx = cuboid["dx"]
+        dy = cuboid["dy"]
+        dz = cuboid["dz"]
+
+        base = len(xs)
+
+        vertices = [
+            (x, y, z),
+            (x + dx, y, z),
+            (x + dx, y + dy, z),
+            (x, y + dy, z),
+            (x, y, z + dz),
+            (x + dx, y, z + dz),
+            (x + dx, y + dy, z + dz),
+            (x, y + dy, z + dz),
+        ]
+
+        for vx, vy, vz in vertices:
+            xs.append(vx)
+            ys.append(vy)
+            zs.append(vz)
+
+        for a, b, c in faces:
+            ii.append(base + a)
+            jj.append(base + b)
+            kk.append(base + c)
+
+    return xs, ys, zs, ii, jj, kk
+
+
+def cuboid_edge_arrays(cuboids):
+    ex, ey, ez = [], [], []
+
+    edge_pairs = [
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+    ]
+
+    for cuboid in cuboids:
+        x = cuboid["x"]
+        y = cuboid["y"]
+        z = cuboid["z"]
+        dx = cuboid["dx"]
+        dy = cuboid["dy"]
+        dz = cuboid["dz"]
+
+        vertices = [
+            (x, y, z),
+            (x + dx, y, z),
+            (x + dx, y + dy, z),
+            (x, y + dy, z),
+            (x, y, z + dz),
+            (x + dx, y, z + dz),
+            (x + dx, y + dy, z + dz),
+            (x, y + dy, z + dz),
+        ]
+
+        for a, b in edge_pairs:
+            ex.extend([vertices[a][0], vertices[b][0], None])
+            ey.extend([vertices[a][1], vertices[b][1], None])
+            ez.extend([vertices[a][2], vertices[b][2], None])
+
+    return ex, ey, ez
+
+
+def add_cuboid_group(
     fig,
-    x,
-    y,
-    z,
-    dx,
-    dy,
-    dz,
-    color,
-    line_color,
-    opacity=1.0,
+    cuboids,
+    fill_color,
+    edge_color,
+    name,
+    edge_width=2.0,
+    opacity=0.98,
 ):
+    if not cuboids:
+        return
+
+    xs, ys, zs, ii, jj, kk = cuboid_vertices_faces(cuboids)
+
     fig.add_trace(
         go.Mesh3d(
-            x=[
-                x,
-                x + dx,
-                x + dx,
-                x,
-                x,
-                x + dx,
-                x + dx,
-                x,
-            ],
-            y=[
-                y,
-                y,
-                y + dy,
-                y + dy,
-                y,
-                y,
-                y + dy,
-                y + dy,
-            ],
-            z=[
-                z,
-                z,
-                z,
-                z,
-                z + dz,
-                z + dz,
-                z + dz,
-                z + dz,
-            ],
-            i=[
-                7, 0, 0, 0,
-                4, 4, 3, 3,
-                0, 0, 1, 1,
-            ],
-            j=[
-                3, 4, 1, 2,
-                5, 6, 2, 7,
-                5, 4, 2, 6,
-            ],
-            k=[
-                0, 7, 2, 3,
-                6, 7, 1, 6,
-                1, 5, 6, 5,
-            ],
-            color=color,
+            x=xs,
+            y=ys,
+            z=zs,
+            i=ii,
+            j=jj,
+            k=kk,
+            color=fill_color,
             opacity=opacity,
             flatshading=True,
-            showscale=False,
+            name=name,
+            showlegend=False,
             hoverinfo="skip",
             lighting=dict(
-                ambient=1.0,
-                diffuse=0.0,
-                specular=0.0,
-                roughness=1.0,
-                fresnel=0.0,
+                ambient=0.72,
+                diffuse=0.58,
+                specular=0.04,
+                roughness=0.95,
+                fresnel=0.02,
             ),
+            lightposition=dict(x=1000, y=-1200, z=2200),
         )
     )
 
-    if opacity >= 0.95:
-        edges = [
-            ([x, x+dx], [y, y], [z, z]),
-            ([x, x], [y, y+dy], [z, z]),
-            ([x+dx, x+dx], [y, y+dy], [z, z]),
-            ([x, x+dx], [y+dy, y+dy], [z, z]),
-            ([x, x+dx], [y, y], [z+dz, z+dz]),
-            ([x, x], [y, y+dy], [z+dz, z+dz]),
-            ([x+dx, x+dx], [y, y+dy], [z+dz, z+dz]),
-            ([x, x+dx], [y+dy, y+dy], [z+dz, z+dz]),
-            ([x, x], [y, y], [z, z+dz]),
-            ([x+dx, x+dx], [y, y], [z, z+dz]),
-            ([x, x], [y+dy, y+dy], [z, z+dz]),
-            ([x+dx, x+dx], [y+dy, y+dy], [z, z+dz]),
-        ]
+    ex, ey, ez = cuboid_edge_arrays(cuboids)
 
-        for edge in edges:
-            fig.add_trace(
-                go.Scatter3d(
-                    x=edge[0],
-                    y=edge[1],
-                    z=edge[2],
-                    mode="lines",
-                    line=dict(
-                        color=line_color,
-                        width=2,
-                    ),
-                    hoverinfo="skip",
-                    showlegend=False,
-                )
-            )
+    fig.add_trace(
+        go.Scatter3d(
+            x=ex,
+            y=ey,
+            z=ez,
+            mode="lines",
+            line=dict(
+                color=edge_color,
+                width=edge_width,
+            ),
+            hoverinfo="skip",
+            showlegend=False,
+            name=f"{name} edges",
+        )
+    )
 
 
 def generate_plotly_3d(
@@ -2028,69 +2301,80 @@ def generate_plotly_3d(
 
     fig = go.Figure()
 
-    draw_plotly_cube(
-        fig,
-        0,
-        0,
-        0,
-        pallet_w,
-        pallet_l,
-        pallet_h,
-        "#cbd5e1",
-        "#475569",
-    )
-
-    color_map = {
-        "A": (
-            "#ffedd5",
-            "#ea580c",
-        ),
-        "B": (
-            "#dbeafe",
-            "#2563eb",
-        ),
+    # Neutral industrial palette: carton tones are deliberately separated
+    # from red securing straps and gray protection accessories.
+    carton_palette = {
+        "A": "#d8b982",
+        "B": "#c7b48e",
     }
+    carton_edge = "#3f3f46"
+    pallet_fill = "#aeb7c2"
+    pallet_edge = "#4b5563"
+    strap_color = "#b91c1c"
+    guard_color = "#6b7280"
+
+    pallet_cuboid = [
+        {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0,
+            "dx": pallet_w,
+            "dy": pallet_l,
+            "dz": pallet_h,
+        }
+    ]
+
+    add_cuboid_group(
+        fig,
+        pallet_cuboid,
+        pallet_fill,
+        pallet_edge,
+        "Pallet",
+        edge_width=2.5,
+    )
 
     layers = build_display_stack(
         layout,
         carton_count,
     )
 
-    for layer_idx, layer_positions in enumerate(
-        layers
-    ):
-        z = (
-            pallet_h
-            + layer_idx * box_vertical_h
-        )
+    carton_groups = {
+        "A": [],
+        "B": [],
+    }
+
+    for layer_idx, layer_positions in enumerate(layers):
+        z = pallet_h + layer_idx * box_vertical_h
 
         for p in layer_positions:
-            fill_color, edge_color = (
-                color_map[p["ROT"]]
+            carton_groups[p["ROT"]].append(
+                {
+                    "x": p["x"],
+                    "y": p["y"],
+                    "z": z,
+                    "dx": p["w"],
+                    "dy": p["l"],
+                    "dz": box_vertical_h,
+                }
             )
 
-            draw_plotly_cube(
-                fig,
-                p["x"],
-                p["y"],
-                z,
-                p["w"],
-                p["l"],
-                box_vertical_h,
-                fill_color,
-                edge_color,
-            )
+    for rot in ("A", "B"):
+        add_cuboid_group(
+            fig,
+            carton_groups[rot],
+            carton_palette[rot],
+            carton_edge,
+            f"Cartons {rot}",
+            edge_width=1.65,
+        )
 
     cargo_top_z = (
-        pallet_h
-        + len(layers) * box_vertical_h
+        pallet_h + len(layers) * box_vertical_h
         if layers
         else pallet_h
     )
 
-    bounds = placement_bounds(
-        layout["PLACEMENTS"]
-    )
+    bounds = placement_bounds(layout["PLACEMENTS"])
 
     if layout["PLACEMENTS"]:
         min_x = bounds["MIN_X"]
@@ -2101,283 +2385,168 @@ def generate_plotly_3d(
         used_w = max_x - min_x
         used_l = max_y - min_y
 
-        guard_color = "#94a3b8"
-        guard_line = "#475569"
-        g_sz = 40
-        g_th = 6
+        if show_corner_guards and cargo_top_z > pallet_h:
+            gx, gy, gz = [], [], []
 
-        if (
-            show_corner_guards
-            and cargo_top_z > pallet_h
-        ):
-            cargo_h = (
-                cargo_top_z
-                - pallet_h
-            )
-
-            corners = [
+            # Four vertical corner guards.
+            for cx, cy in [
                 (min_x, min_y),
                 (max_x, min_y),
-                (min_x, max_y),
                 (max_x, max_y),
+                (min_x, max_y),
+            ]:
+                gx.extend([cx, cx, None])
+                gy.extend([cy, cy, None])
+                gz.extend([pallet_h, cargo_top_z, None])
+
+            # Top perimeter / edge guards.
+            top_points = [
+                (min_x, min_y, cargo_top_z),
+                (max_x, min_y, cargo_top_z),
+                (max_x, max_y, cargo_top_z),
+                (min_x, max_y, cargo_top_z),
+                (min_x, min_y, cargo_top_z),
             ]
 
-            for cx, cy in corners:
-                draw_plotly_cube(
-                    fig,
-                    cx - g_th,
-                    cy - g_th,
-                    pallet_h,
-                    g_sz,
-                    g_th,
-                    cargo_h,
-                    guard_color,
-                    guard_line,
-                )
+            gx.extend([p[0] for p in top_points])
+            gy.extend([p[1] for p in top_points])
+            gz.extend([p[2] for p in top_points])
 
-                draw_plotly_cube(
-                    fig,
-                    cx - g_th,
-                    cy - g_th,
-                    pallet_h,
-                    g_th,
-                    g_sz,
-                    cargo_h,
-                    guard_color,
-                    guard_line,
+            fig.add_trace(
+                go.Scatter3d(
+                    x=gx,
+                    y=gy,
+                    z=gz,
+                    mode="lines",
+                    line=dict(
+                        color=guard_color,
+                        width=8,
+                    ),
+                    hoverinfo="skip",
+                    showlegend=False,
+                    name="Corner / edge guards",
                 )
-
-            safe_offset = min(
-                g_sz + 5,
-                max(
-                    0,
-                    min(
-                        used_w,
-                        used_l,
-                    ) / 4,
-                ),
             )
 
-            if (
-                used_l
-                > 2 * safe_offset
-            ):
-                y_start = (
-                    min_y
-                    + safe_offset
-                )
-                y_len = (
-                    used_l
-                    - 2 * safe_offset
-                )
+        if show_straps and cargo_top_z > pallet_h:
+            sx, sy, sz = [], [], []
 
-                draw_plotly_cube(
-                    fig,
-                    min_x,
-                    y_start,
-                    cargo_top_z,
-                    g_sz,
-                    y_len,
-                    g_th,
-                    guard_color,
-                    guard_line,
-                )
-
-                draw_plotly_cube(
-                    fig,
-                    max_x - g_sz,
-                    y_start,
-                    cargo_top_z,
-                    g_sz,
-                    y_len,
-                    g_th,
-                    guard_color,
-                    guard_line,
-                )
-
-            if (
-                used_w
-                > 2 * safe_offset
-            ):
-                x_start = (
-                    min_x
-                    + safe_offset
-                )
-                x_len = (
-                    used_w
-                    - 2 * safe_offset
-                )
-
-                draw_plotly_cube(
-                    fig,
-                    x_start,
-                    min_y,
-                    cargo_top_z,
-                    x_len,
-                    g_sz,
-                    g_th,
-                    guard_color,
-                    guard_line,
-                )
-
-                draw_plotly_cube(
-                    fig,
-                    x_start,
-                    max_y - g_sz,
-                    cargo_top_z,
-                    x_len,
-                    g_sz,
-                    g_th,
-                    guard_color,
-                    guard_line,
-                )
-
-        if (
-            show_straps
-            and cargo_top_z > pallet_h
-        ):
-            strap_color = "#1e3a8a"
-
-            for sx in [
-                min_x + used_w * 0.25,
-                min_x + used_w * 0.75,
+            # Two straps around the Y direction.
+            for x_pos in [
+                min_x + used_w * 0.30,
+                min_x + used_w * 0.70,
             ]:
-                fig.add_trace(
-                    go.Scatter3d(
-                        x=[
-                            sx, sx, sx, sx, sx
-                        ],
-                        y=[
-                            min_y,
-                            min_y,
-                            max_y,
-                            max_y,
-                            min_y,
-                        ],
-                        z=[
-                            pallet_h,
-                            cargo_top_z + 8,
-                            cargo_top_z + 8,
-                            pallet_h,
-                            pallet_h,
-                        ],
-                        mode="lines",
-                        line=dict(
-                            color=strap_color,
-                            width=4.5,
-                        ),
-                        hoverinfo="skip",
-                        showlegend=False,
-                    )
-                )
+                path = [
+                    (x_pos, min_y, pallet_h),
+                    (x_pos, min_y, cargo_top_z + 10),
+                    (x_pos, max_y, cargo_top_z + 10),
+                    (x_pos, max_y, pallet_h),
+                ]
+                sx.extend([p[0] for p in path] + [None])
+                sy.extend([p[1] for p in path] + [None])
+                sz.extend([p[2] for p in path] + [None])
 
-            for sy in [
-                min_y + used_l * 0.25,
-                min_y + used_l * 0.75,
+            # Two straps around the X direction.
+            for y_pos in [
+                min_y + used_l * 0.30,
+                min_y + used_l * 0.70,
             ]:
-                fig.add_trace(
-                    go.Scatter3d(
-                        x=[
-                            min_x,
-                            max_x,
-                            max_x,
-                            min_x,
-                            min_x,
-                        ],
-                        y=[
-                            sy, sy, sy, sy, sy
-                        ],
-                        z=[
-                            pallet_h,
-                            pallet_h,
-                            cargo_top_z + 8,
-                            cargo_top_z + 8,
-                            pallet_h,
-                        ],
-                        mode="lines",
-                        line=dict(
-                            color=strap_color,
-                            width=4.5,
-                        ),
-                        hoverinfo="skip",
-                        showlegend=False,
-                    )
+                path = [
+                    (min_x, y_pos, pallet_h),
+                    (max_x, y_pos, pallet_h),
+                    (max_x, y_pos, cargo_top_z + 10),
+                    (min_x, y_pos, cargo_top_z + 10),
+                ]
+                sx.extend([p[0] for p in path] + [None])
+                sy.extend([p[1] for p in path] + [None])
+                sz.extend([p[2] for p in path] + [None])
+
+            fig.add_trace(
+                go.Scatter3d(
+                    x=sx,
+                    y=sy,
+                    z=sz,
+                    mode="lines",
+                    line=dict(
+                        color=strap_color,
+                        width=5,
+                    ),
+                    hoverinfo="skip",
+                    showlegend=False,
+                    name="Securing straps",
                 )
+            )
 
     if show_height_plane:
         fig.add_trace(
             go.Mesh3d(
-                x=[
-                    0,
-                    pallet_w,
-                    pallet_w,
-                    0,
-                ],
-                y=[
-                    0,
-                    0,
-                    pallet_l,
-                    pallet_l,
-                ],
-                z=[
-                    max_total_height
-                ] * 4,
-                color="#ef4444",
-                opacity=0.08,
+                x=[0, pallet_w, pallet_w, 0],
+                y=[0, 0, pallet_l, pallet_l],
+                z=[max_total_height] * 4,
+                i=[0, 0],
+                j=[1, 2],
+                k=[2, 3],
+                color="#dc2626",
+                opacity=0.055,
                 hoverinfo="skip",
                 showscale=False,
+                showlegend=False,
+                name="Height limit",
             )
         )
 
-    base_max = max(
-        pallet_w,
-        pallet_l,
-        max_total_height,
-    )
+    x_span = pallet_w + 2 * overhang_allowance
+    y_span = pallet_l + 2 * overhang_allowance
+    z_span = max_total_height
+    base_max = max(x_span, y_span, z_span)
 
-    margin = max(
-        100,
-        overhang_allowance + 50,
-    )
+    margin = max(80.0, overhang_allowance + 45.0)
 
     fig.update_layout(
         scene=dict(
             xaxis=dict(
                 title="Width (mm)",
-                range=[
-                    -margin,
-                    pallet_w + margin,
-                ],
+                range=[-margin, pallet_w + margin],
+                gridcolor="rgba(148,163,184,.22)",
+                zeroline=False,
+                showbackground=False,
+                nticks=6,
             ),
             yaxis=dict(
                 title="Length (mm)",
-                range=[
-                    -margin,
-                    pallet_l + margin,
-                ],
+                range=[-margin, pallet_l + margin],
+                gridcolor="rgba(148,163,184,.22)",
+                zeroline=False,
+                showbackground=False,
+                nticks=6,
             ),
             zaxis=dict(
                 title="Height (mm)",
-                range=[
-                    0,
-                    max_total_height + 150,
-                ],
+                range=[0, max_total_height + 100],
+                gridcolor="rgba(148,163,184,.22)",
+                zeroline=False,
+                showbackground=False,
+                nticks=7,
             ),
             aspectmode="manual",
             aspectratio=dict(
-                x=pallet_w / base_max,
-                y=pallet_l / base_max,
-                z=max_total_height / base_max,
+                x=x_span / base_max,
+                y=y_span / base_max,
+                z=z_span / base_max,
             ),
+            camera=dict(
+                projection=dict(type="orthographic"),
+                eye=dict(x=1.55, y=1.45, z=1.15),
+                up=dict(x=0, y=0, z=1),
+            ),
+            bgcolor="rgba(0,0,0,0)",
         ),
-        margin=dict(
-            r=0,
-            l=0,
-            b=0,
-            t=30,
-        ),
+        margin=dict(r=5, l=5, b=5, t=28),
         showlegend=False,
         height=650,
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#cbd5e1"),
+        uirevision="v021-industrial-orthographic",
     )
 
     return fig
@@ -2674,15 +2843,19 @@ def render_scenario(
         unsafe_allow_html=True,
     )
 
-    top_tab, side_tab, industrial_tab = st.tabs(
+    visualization = st.radio(
+        "Visualization",
         [
             "🔝 Smart Layer Pattern",
-            "📐 Height / Side View",
-            "🌐 3D Packaging Preview",
-        ]
+            "📐 Engineering Elevation",
+            "🧊 Lightweight 3D",
+        ],
+        index=0,
+        horizontal=True,
+        key=f"{key_prefix}_visualization",
     )
 
-    with top_tab:
+    if visualization == "🔝 Smart Layer Pattern":
         st.markdown(
             generate_svg_layer(
                 display_layout,
@@ -2697,30 +2870,20 @@ def render_scenario(
             "ทั้งสองแบบยังคง Up Orientation เดียวกัน"
         )
 
-    with side_tab:
-        front_fig = generate_2d_side_view(
-            display_layout,
-            display_count,
-            scenario["GROUP"][
-                "BOX_VERTICAL_H"
-            ],
-            "front",
+    elif visualization == "📐 Engineering Elevation":
+        st.markdown(
+            generate_true_scale_elevation_svg(
+                display_layout,
+                display_count,
+                scenario["GROUP"]["BOX_VERTICAL_H"],
+            ),
+            unsafe_allow_html=True,
         )
 
-        st.pyplot(front_fig)
-        plt.close(front_fig)
-
-        side_fig = generate_2d_side_view(
-            display_layout,
-            display_count,
-            scenario["GROUP"][
-                "BOX_VERTICAL_H"
-            ],
-            "side",
+        st.caption(
+            "Front / Side อยู่ใน SVG เดียวกันและใช้ physical scale เดียวกันทุกแกน • "
+            "Hidden rear carton edges ถูกตัดออกจาก visible-face projection"
         )
-
-        st.pyplot(side_fig)
-        plt.close(side_fig)
 
         if (
             display_count
@@ -2733,24 +2896,31 @@ def render_scenario(
                 "อยู่ใกล้กึ่งกลางพาเลท"
             )
 
-    with industrial_tab:
+    else:
+        st.caption(
+            "Orthographic industrial view • Kraft cartons + dark carton edges + red straps • "
+            "3D จะถูกสร้างเฉพาะเมื่อเลือก View นี้เพื่อลดเวลา rerun"
+        )
+
         fig = generate_plotly_3d(
             display_layout,
             display_count,
-            scenario["GROUP"][
-                "BOX_VERTICAL_H"
-            ],
+            scenario["GROUP"]["BOX_VERTICAL_H"],
         )
 
         if fig is not None:
             st.plotly_chart(
                 fig,
                 use_container_width=True,
+                config={
+                    "displaylogo": False,
+                    "scrollZoom": True,
+                },
             )
 
         st.caption(
-            "Corner Guards / Straps เป็น 3D illustration "
-            "เพื่อช่วยสื่อสารเท่านั้น ไม่ใช่ Packaging requirement recommendation"
+            "Corner Guards / Straps เป็น 3D illustration เพื่อช่วยสื่อสารเท่านั้น "
+            "ไม่ใช่ Packaging requirement recommendation"
         )
 
 
@@ -2827,7 +2997,7 @@ total_layouts = sum(
 )
 
 st.caption(
-    f"V0.2 evaluated {total_layouts} unique floor layouts "
+    f"V0.2.1 evaluated {total_layouts} unique floor layouts "
     "from Simple Grid, Mixed Rows, Mixed Columns"
     + (
         ", Residual L-Fill"
@@ -3254,9 +3424,9 @@ with st.expander(
 ):
     st.markdown(
         """
-        **V0.2 Smart Floor Optimizer**
+        **V0.2.1 Visualization & Performance Update**
 
-        - V0.2 ประเมิน Floor Pattern หลาย Strategy ภายใน Up Orientation เดียวกัน:
+        - **Smart Floor Solver ใช้ Logic เดิมจาก V0.2** และยังประเมิน Floor Pattern หลาย Strategy ภายใน Up Orientation เดียวกัน:
           **Simple Grid, Mixed Rows, Mixed Columns และ Residual L-Fill**.
         - Rotation A / B ใน Layer Pattern คือการหมุนกล่องบนพื้น 90° เท่านั้น
           และ **ไม่ได้เปลี่ยน H-Up / L-Up / W-Up**.
@@ -3274,6 +3444,8 @@ with st.expander(
         - Allowed Overhang ถูกคิดแบบสมมาตรทั้ง 4 ด้าน.
         - Carton Area Coverage สามารถเกิน 100% ได้เมื่อเปิด Overhang; จึงมี
           Actual carton area / allowed footprint แสดงแยกในรายละเอียด.
+        - Engineering Elevation ใช้ **True relative physical scale** สำหรับ W / L / H และใช้ visible-face projection เพื่อตัด hidden rear edges.
+        - Lightweight 3D รวม carton meshes / edges เป็น grouped traces, ใช้ orthographic camera และ render เฉพาะเมื่อผู้ใช้เลือก 3D View.
         - 3D Corner Guards / Straps เป็น **Illustration only** ไม่ใช่ระบบคำนวณหรือ Recommendation.
         - V0.2 ยังไม่พิจารณา Compression Strength, Box Stacking Strength,
           Column-vs-Interlock structural performance, Slip Sheet, Stretch Film,
